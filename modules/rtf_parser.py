@@ -51,6 +51,71 @@ _BKMKEND_RE  = re.compile(r"bkmkend\s+IDX")
 _ROW_RE      = re.compile(r"\\row(?![a-zA-Z])")
 _SIGWORD_RE  = re.compile(r"\\(par|trowd|cell)(?![a-zA-Z])")
 
+# RTF Unicode escape: \uN followed by exactly 1 fallback character (RTF spec §2.1.1)
+_RTF_UNICODE_RE = re.compile(r"\\u(-?\d+)(.)", re.DOTALL)
+
+# New-format (SAS RTF header-group titles): first Table/Figure/Listing cell at \fs18
+_HEADER_TITLE_CELL_RE = re.compile(
+    r"\{((?:Table|Figure|Listing)\s+[\d]+(?:\.[\d]+)*[^\}]*?)\\cell",
+    re.IGNORECASE,
+)
+# Normalises "Table X.X.X Title" → "Table X.X.X: Title" (idempotent when colon already present)
+_COLON_NORMALISE_RE = re.compile(
+    r"^((?:Table|Figure|Listing)\s+[\d]+(?:\.[\d]+)*)(?::\s*|\s+)(.+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _extract_header_group(raw: str) -> str | None:
+    """Return the content of the RTF \\header destination group, or None."""
+    m = re.search(r"\\header(?![a-zA-Z])", raw)
+    if not m:
+        return None
+    start = raw.rfind("{", 0, m.start())
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(raw)):
+        if raw[i] == "{":
+            depth += 1
+        elif raw[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return raw[start : i + 1]
+    return raw[start:]
+
+
+def _decode_rtf_unicode(s: str) -> str:
+    """Convert RTF \\uN escape sequences to Unicode, discarding the fallback char."""
+    def repl(m: re.Match) -> str:
+        n = int(m.group(1))
+        if n < 0:       # RTF uses signed 16-bit integers
+            n += 65536
+        return chr(n)   # group(2) is the 1-char ANSI fallback — consumed, not kept
+    return _RTF_UNICODE_RE.sub(repl, s)
+
+
+def _extract_header_group_title(raw: str) -> str | None:
+    """Extract a Table/Figure/Listing title from the RTF \\header group.
+
+    Returns the normalised title string, or None if this file does not use
+    the header-group title format.
+    """
+    header = _extract_header_group(raw)
+    if not header:
+        return None
+    m = _HEADER_TITLE_CELL_RE.search(header)
+    if not m:
+        return None
+    plain = _RTF_CONTROL_WORD_RE.sub(
+        " ", _decode_rtf_unicode(m.group(1).replace("\\~", " "))
+    ).strip()
+    plain = " ".join(plain.split())
+    c = _COLON_NORMALISE_RE.match(plain)
+    if c:
+        plain = f"{c.group(1)}: {c.group(2).strip()}"
+    return plain or None
+
 
 def _is_two_row_title(raw: str) -> bool:
     """Return True when the title occupies two consecutive rows followed by \\par.
@@ -130,6 +195,11 @@ def extract_title(rtf_path: str | Path, max_read_bytes: int = 16_384) -> str:
         raw = raw_bytes.decode("cp1252", errors="replace")
     except (OSError, IOError):
         return rtf_path.stem  # safe fallback: use filename
+
+    # New-format: title lives in the RTF \header destination group.
+    header_title = _extract_header_group_title(raw)
+    if header_title:
+        return header_title
 
     # Detect multi-line title.
     # Format 1: \line control word present in the raw RTF.

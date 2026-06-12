@@ -32,3 +32,6 @@ Thumbs.db
 
 # Backup folder
 20260526-backup/
+
+# Sample data
+samples/

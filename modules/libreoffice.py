@@ -80,6 +80,15 @@ def find_soffice() -> str:
     )
 
 
+def _timeout_for(rtf_path: Path) -> int:
+    """Return a per-file timeout scaled to the RTF file size."""
+    try:
+        size_mb = rtf_path.stat().st_size / 1_000_000
+    except OSError:
+        size_mb = 0.0
+    return max(config.LIBREOFFICE_TIMEOUT_MIN, int(size_mb * config.LIBREOFFICE_TIMEOUT_PER_MB))
+
+
 def convert_rtf_to_pdf(
     rtf_path: str | Path,
     output_dir: str | Path,
@@ -146,7 +155,7 @@ def convert_rtf_to_pdf(
         cmd,
         capture_output=True,
         text=True,
-        timeout=config.LIBREOFFICE_TIMEOUT,
+        timeout=_timeout_for(rtf_path),
     )
 
     if result.returncode != 0:

@@ -32,6 +32,23 @@ import config
 from modules.pdf_merger import SectionInfo
 
 
+# Characters outside Latin-1 that PyMuPDF's built-in fonts cannot render —
+# substituted with their closest ASCII equivalents before drawing.
+_LATIN1_SAFE = str.maketrans({
+    '–': '-',   # en dash
+    '—': '-',   # em dash
+    '‘': "'",   # left single quotation mark
+    '’': "'",   # right single quotation mark
+    '“': '"',   # left double quotation mark
+    '”': '"',   # right double quotation mark
+    '…': '...',  # horizontal ellipsis
+})
+
+
+def _latin1_safe(text: str) -> str:
+    return text.translate(_LATIN1_SAFE)
+
+
 # ---------------------------------------------------------------------------
 # Layout helpers
 # ---------------------------------------------------------------------------
@@ -166,6 +183,7 @@ def _render_toc_pages(
             label = f"{section.table_number}  {section.title}"
         else:
             label = section.title
+        label = _latin1_safe(label)
 
         # ── Page number string ───────────────────────────────────────────
         page_num_str = str(master_page_num)

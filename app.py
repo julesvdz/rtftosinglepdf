@@ -90,8 +90,9 @@ def _update_job(job_id: str, **kwargs: Any) -> None:
 
 
 def _append_log(job_id: str, line: str) -> None:
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
     with _JOBS_LOCK:
-        JOBS[job_id]["log"].append(line)
+        JOBS[job_id]["log"].append(f"{ts}  {line}")
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +175,7 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                         f"[SKIP] {entry.rtf_filename} — not found in RTF directory",
                     )
         else:
-            _append_log(job_id, "[INFO] No CSV — using alphanumeric file order…")
+            _append_log(job_id, "[INFO] No CSV — collating alphabetically, processing largest-first…")
             rtf_files = sorted(rtf_dir.glob("*.rtf"), key=lambda p: p.name.lower())
             rtf_files += sorted(rtf_dir.glob("*.RTF"), key=lambda p: p.name.lower())
             # De-duplicate (case-insensitive systems); skip temp/hidden files
@@ -186,6 +187,7 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                 if key not in seen and not p.name.startswith(("~", ".")):
                     seen.add(key)
                     unique_rtf.append(p)
+
 
             title_workers = max(1, min(8, len(unique_rtf)))
             titles: list[str] = [""] * len(unique_rtf)
@@ -238,6 +240,7 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
             idx: int, rtf_path: Path, title: str, table_num: str
         ) -> tuple[int, str | None, Exception | None]:
             slot = _assign_slot()
+            _append_log(job_id, f"[START] [file {idx + 1} of {total_files}] {rtf_path.name}")
             try:
                 pdf_path = convert_rtf_to_pdf(
                     rtf_path, indiv_dir,
@@ -257,7 +260,11 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
             with ThreadPoolExecutor(max_workers=n_workers) as executor:
                 future_to_idx = {
                     executor.submit(_convert_one, idx, rtf_path, title, table_num): idx
-                    for idx, (rtf_path, title, table_num) in enumerate(file_list)
+                    for idx, (rtf_path, title, table_num) in sorted(
+                        enumerate(file_list),
+                        key=lambda x: x[1][0].stat().st_size,
+                        reverse=True,
+                    )
                 }
                 completed_count = 0
                 for future in as_completed(future_to_idx):
@@ -266,14 +273,14 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                     completed_count += 1
                     pct = 5 + int(60 * completed_count / total_files)
                     _update_job(job_id, progress=pct)
-                    file_tag = f"[file {completed_count} of {total_files}]"
+                    file_tag = f"[file {orig_idx + 1} of {total_files}]"
                     if exc is not None:
                         plogger.log_conversion_error(rtf_path.name, exc)
-                        _append_log(job_id, f"[ERR]  {file_tag} {rtf_path.name}: {exc}")
+                        _append_log(job_id, f"[FAIL] {file_tag} {rtf_path.name}: {exc}")
                     else:
                         _append_log(
                             job_id,
-                            f"[OK]   {file_tag} {rtf_path.name} → {Path(pdf_path_str).name}",
+                            f"[DONE] {file_tag} {rtf_path.name} → {Path(pdf_path_str).name}",
                         )
                         results_by_index[orig_idx] = (pdf_path_str, title, table_num, rtf_path.name)
                         plogger.log_info(f"Converted: {rtf_path.name}")

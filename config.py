@@ -53,9 +53,10 @@ TOC_LINE_HEIGHT: float = 18.0       # vertical spacing between entries (pts)
 TOC_DOT_LEADER_CHAR: str = "."
 
 # ---------------------------------------------------------------------------
-# LibreOffice conversion timeout (seconds per file)
+# LibreOffice conversion timeout — scaled by RTF file size
 # ---------------------------------------------------------------------------
-LIBREOFFICE_TIMEOUT: int = 120
+LIBREOFFICE_TIMEOUT_PER_MB: float = 90.0   # seconds per MB of RTF file size
+LIBREOFFICE_TIMEOUT_MIN: int = 60          # floor: never less than this
 
 # ---------------------------------------------------------------------------
 # Maximum simultaneous LibreOffice conversion workers
