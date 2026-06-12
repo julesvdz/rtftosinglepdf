@@ -1,0 +1,434 @@
+/* ==========================================================================
+   style.css — RTF-to-PDF Compiler  |  Clean Light Theme
+   Font stack: Arial, then system sans-serif fallbacks.
+   Monospaced sections use "Consolas", then monospace fallbacks.
+   ========================================================================== */
+
+/* ── Reset & box model ───────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Root design tokens ──────────────────────────────────────────────────── */
+:root {
+  /* Background layers */
+  --bg-shell:      #f0f0f0;   /* outer app background */
+  --bg-panel:      #ffffff;   /* panel background */
+  --bg-panel-hdr:  #e8e8e8;   /* panel header band */
+  --bg-input:      #ffffff;   /* text input background */
+  --bg-log:        #f8f8f8;   /* log pane background */
+  --bg-progress:   #0e639c;   /* progress bar fill */
+
+  /* Borders */
+  --border:        #d0d0d0;
+  --border-focus:  #007fd4;
+
+  /* Text */
+  --text-primary:  #1e1e1e;
+  --text-muted:    #717171;
+  --text-subhdr:   #005fb8;   /* blue subheadings */
+  --text-label:    #3c3c3c;
+  --text-log:      #2d2d2d;   /* monospaced log text */
+  --text-error:    #c5161b;
+  --text-ok:       #1b7737;
+  --text-warn:     #7d5700;
+
+  /* Buttons */
+  --btn-primary-bg:   #0e639c;
+  --btn-primary-hover:#1177bb;
+  --btn-primary-text: #ffffff;
+  --btn-secondary-bg: #e8e8e8;
+  --btn-secondary-hover: #d4d4d4;
+
+  /* Fonts */
+  --font-ui:   Arial, "Helvetica Neue", Helvetica, sans-serif;
+  --font-mono: "Consolas", "Courier New", Courier, monospace;
+
+  /* Spacing */
+  --gap-sm:   8px;
+  --gap-md:   14px;
+  --gap-lg:   20px;
+  --radius:   3px;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+html, body {
+  height: 100%;
+  background-color: var(--bg-shell);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── App shell ───────────────────────────────────────────────────────────── */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-md);
+  padding: 10px 20px;
+  background: var(--bg-panel-hdr);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.app-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.top-bar-actions {
+  display: flex;
+  gap: var(--gap-sm);
+  flex-shrink: 0;
+}
+
+/* ── Main content ────────────────────────────────────────────────────────── */
+.main-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  flex: 1;
+}
+
+/* ── Panel ───────────────────────────────────────────────────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+}
+
+.panel-header {
+  padding: 7px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-subhdr);
+  background: var(--bg-panel-hdr);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-subheader {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--gap-sm);
+  padding-top: 2px;
+}
+
+.panel-body {
+  padding: var(--gap-lg);
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ── Form fields ─────────────────────────────────────────────────────────── */
+.field-group {
+  margin-bottom: var(--gap-md);
+}
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-label);
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.field-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.field-input {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field-input:focus {
+  border-color: var(--border-focus);
+}
+
+.field-input.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.field-input.narrow {
+  width: 120px;
+}
+
+/* File inputs */
+.field-input[type="file"] {
+  padding: 4px 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.field-input[type="file"]::-webkit-file-upload-button {
+  background: var(--btn-secondary-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  margin-right: 8px;
+}
+
+/* Number inputs — remove browser spinners for a cleaner look */
+.field-input[type="number"]::-webkit-inner-spin-button,
+.field-input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.4;
+}
+
+/* Inline group (label + button side by side) */
+.inline-group {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: flex-end;
+}
+
+.inline-group .field-input {
+  flex: 1;
+}
+
+/* ── Grid layouts for H/F and coords ────────────────────────────────────── */
+.hf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--gap-sm);
+  margin-bottom: var(--gap-md);
+}
+
+.coords-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--gap-sm);
+}
+
+/* ── Section divider ─────────────────────────────────────────────────────── */
+.section-divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--gap-lg) 0;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+  line-height: 1.4;
+}
+
+.btn-primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-color: var(--btn-primary-bg);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--btn-primary-hover);
+  border-color: var(--btn-primary-hover);
+}
+
+.btn-secondary {
+  background: var(--btn-secondary-bg);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--btn-secondary-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+  font-size: 11px;
+}
+
+.btn-ghost:hover {
+  color: var(--text-primary);
+  background: var(--bg-input);
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Progress bar ────────────────────────────────────────────────────────── */
+.progress-container {
+  margin-top: var(--gap-sm);
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-input);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--bg-progress);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* ── Error box ───────────────────────────────────────────────────────────── */
+.error-box {
+  margin-top: var(--gap-sm);
+  padding: 8px 10px;
+  background: rgba(197, 22, 27, 0.07);
+  border: 1px solid var(--text-error);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--text-error);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Small status line (config load feedback) */
+.status-small {
+  font-size: 11px;
+  margin-top: 4px;
+  min-height: 14px;
+  color: var(--text-ok);
+  font-family: var(--font-mono);
+}
+
+/* ── Log panel ───────────────────────────────────────────────────────────── */
+.log-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-log);
+  border-top: 1px solid var(--border);
+  min-height: 200px;
+  max-height: 340px;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  background: var(--bg-panel-hdr);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.log-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-log);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Colour tokens applied by JS via data attributes on log lines */
+.log-body .log-err  { color: var(--text-error); }
+.log-body .log-ok   { color: var(--text-ok); }
+.log-body .log-warn { color: var(--text-warn); }
+.log-body .log-info { color: var(--text-muted); }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #b8b8b8;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: #999; }
+
+/* ── Button row (beneath a field, multiple side-by-side buttons) ─────────── */
+.btn-row {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: 6px;
+}
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
+/* ── Responsive: single column on narrow viewports ──────────────────────── */
+@media (max-width: 780px) {
+  .main-content {
+    grid-template-columns: 1fr;
+  }
+  .hf-grid,
+  .coords-grid {
+    grid-template-columns: 1fr;
+  }
+}
