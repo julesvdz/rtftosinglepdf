@@ -59,8 +59,9 @@ LIBREOFFICE_TIMEOUT_PER_MB: float = 90.0   # seconds per MB of RTF file size
 LIBREOFFICE_TIMEOUT_MIN: int = 60          # floor: never less than this
 
 # ---------------------------------------------------------------------------
-# Maximum simultaneous LibreOffice conversion workers
+# LibreOffice conversion workers: form default and hard cap
 # ---------------------------------------------------------------------------
+DEFAULT_PARALLEL_CONVERSIONS: int = 4
 MAX_PARALLEL_CONVERSIONS: int = 8
 
 # ---------------------------------------------------------------------------

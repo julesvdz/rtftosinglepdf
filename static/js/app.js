@@ -19,6 +19,15 @@ const btnGenerateMapping = document.getElementById('btn-generate-mapping');
 const btnClearCsv        = document.getElementById('btn-clear-csv');
 const btnPreviewLayout   = document.getElementById('btn-preview-layout');
 const btnClearLog        = document.getElementById('btn-clear-log');
+const btnBrowseRtf       = document.getElementById('btn-browse-rtf');
+const btnBrowseOutput    = document.getElementById('btn-browse-output');
+const btnLogAll          = document.getElementById('btn-log-all');
+const btnLogProblems     = document.getElementById('btn-log-problems');
+const btnCopyLog         = document.getElementById('btn-copy-log');
+const rtfDirInput        = document.getElementById('rtf_directory');
+const outputDirInput     = document.getElementById('output_directory');
+const rtfDirStatus       = document.getElementById('rtf-dir-status');
+const outputDirStatus    = document.getElementById('output-dir-status');
 
 const logBody           = document.getElementById('log-body');
 const progressContainer = document.getElementById('progress-container');
@@ -37,6 +46,11 @@ let activeJobId   = null;
 let pollTimer     = null;
 let clockTimer    = null;
 let logLinesSeen  = 0;   // track how many log lines we have already rendered
+let jobRunning    = false;
+const dirState    = { rtfOk: false, outOk: false };
+
+const BASE_TITLE = 'RTF to PDF compiler';
+const LOG_PLACEHOLDER = 'Ready. Configure inputs and click Run job.';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,9 +72,19 @@ function lineClass(line) {
  * Append new log lines to the log pane, colour-coded.
  * Only appends lines beyond `logLinesSeen` to avoid re-rendering.
  */
+/**
+ * True when the log pane is scrolled to (near) the bottom. New lines only
+ * auto-scroll in that case, so reading older lines isn't interrupted.
+ */
+function logAtBottom() {
+  return logBody.scrollTop + logBody.clientHeight >= logBody.scrollHeight - 24;
+}
+
 function appendLogLines(lines) {
   const newLines = lines.slice(logLinesSeen);
   if (newLines.length === 0) return;
+
+  const stick = logAtBottom();
 
   // If the log pane currently shows only the placeholder text, clear it.
   if (logLinesSeen === 0) {
@@ -76,8 +100,7 @@ function appendLogLines(lines) {
 
   logLinesSeen += newLines.length;
 
-  // Auto-scroll to bottom
-  logBody.scrollTop = logBody.scrollHeight;
+  if (stick) logBody.scrollTop = logBody.scrollHeight;
 }
 
 /**
@@ -86,7 +109,8 @@ function appendLogLines(lines) {
  * part of a running job's polling stream.
  */
 function appendDirectLines(lines) {
-  if (logBody.textContent === 'Ready. Configure inputs and click Run Job.') {
+  const stick = logAtBottom();
+  if (logBody.textContent === LOG_PLACEHOLDER) {
     logBody.textContent = '';
   }
   lines.forEach(line => {
@@ -95,7 +119,7 @@ function appendDirectLines(lines) {
     span.textContent = line + '\n';
     logBody.appendChild(span);
   });
-  logBody.scrollTop = logBody.scrollHeight;
+  if (stick) logBody.scrollTop = logBody.scrollHeight;
 }
 
 function setProgress(pct, label) {
@@ -228,21 +252,47 @@ function renderStepProgress(step) {
   stepProgressRow.appendChild(row);
 }
 
-function showProgressContainer() {
-  progressContainer.classList.remove('hidden');
+/** Radio helpers: read/write a radio group by its name attribute. */
+function radioValue(name) {
+  const el = document.querySelector(`input[name="${name}"]:checked`);
+  return el ? el.value : '';
+}
+
+function setRadio(name, value) {
+  const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
+  if (el) el.checked = true;
+}
+
+/**
+ * Run job is available only when the RTF directory is valid, the output
+ * directory is filled in, and no job is currently running.
+ */
+function updateRunEnabled() {
+  btnRun.disabled = jobRunning || !dirState.rtfOk || !dirState.outOk;
+  btnRun.title = btnRun.disabled && !jobRunning
+    ? 'Enter a valid RTF directory and an output directory first'
+    : '';
+}
+
+/** ToC orientation has no effect when the ToC itself is off. */
+function syncTocOrientation() {
+  const off = radioValue('toc_enabled') === '0';
+  document.getElementById('toc-orientation-seg').classList.toggle('disabled', off);
+  document.getElementById('toc-orientation-label').classList.toggle('disabled', off);
 }
 
 function resetUI() {
   logLinesSeen = 0;
-  logBody.textContent = 'Ready. Configure inputs and click Run Job.';
+  logBody.textContent = LOG_PLACEHOLDER;
   setProgress(0, 'Idle');
+  document.title = BASE_TITLE;
   jobErrorBox.classList.add('hidden');
   jobErrorBox.textContent = '';
-  btnRun.disabled = false;
+  jobRunning = false;
+  updateRunEnabled();
   btnDownload.disabled = true;
   btnDownload.dataset.jobId = '';
   activeJobId = null;
-  progressContainer.classList.add('hidden');
   fileProgress.classList.add('hidden');
   fileProgressSummary.textContent = '';
   fileProgressList.textContent = '';
@@ -267,7 +317,13 @@ const FIELD_MAP = [
   ['page_number_bottom_margin_pts', 'page_number_bottom_margin_pts'],
   ['page_number_font_size',         'page_number_font_size'],
   ['max_workers',                   'max_workers'],
-  ['toc_landscape',                 'toc_landscape'],
+];
+
+/** Radio groups restored separately (name → config key, boolean-valued). */
+const RADIO_MAP = [
+  ['toc_enabled',       'toc_enabled'],
+  ['toc_landscape',     'toc_landscape'],
+  ['bookmarks_enabled', 'bookmarks_enabled'],
 ];
 
 function populateFieldsFromConfig(cfg) {
@@ -288,20 +344,23 @@ function populateFieldsFromConfig(cfg) {
     page_number_right_margin_pts:  cfg.page_number_right_margin_pts  ?? 55,
     page_number_bottom_margin_pts: cfg.page_number_bottom_margin_pts ?? 18,
     page_number_font_size:         cfg.page_number_font_size         ?? 8,
-    max_workers:                   cfg.max_workers                   ?? 8,
-    toc_landscape:                 cfg.toc_landscape                 ?? false,
+    max_workers:                   cfg.max_workers                   ?? 4,
   };
 
   for (const [fieldId, _] of FIELD_MAP) {
     const el = document.getElementById(fieldId);
     if (el && valueMap[fieldId] !== undefined) {
-      if (el.type === 'checkbox') {
-        el.checked = !!valueMap[fieldId];
-      } else {
-        el.value = valueMap[fieldId];
-      }
+      el.value = valueMap[fieldId];
     }
   }
+
+  const radioDefaults = { toc_enabled: true, toc_landscape: false, bookmarks_enabled: true };
+  for (const [name, key] of RADIO_MAP) {
+    setRadio(name, (cfg[key] ?? radioDefaults[name]) ? '1' : '0');
+  }
+  syncTocOrientation();
+  validateDirectory('rtf');
+  validateDirectory('output');
 
   configLoadStatus.textContent =
     `Config loaded (saved ${cfg.timestamp ?? 'unknown time'})`;
@@ -326,8 +385,9 @@ function buildFormData() {
     if (el) fd.append(id, el.value);
   });
 
-  const tocLandscapeEl = document.getElementById('toc_landscape');
-  if (tocLandscapeEl) fd.append('toc_landscape', tocLandscapeEl.checked ? '1' : '0');
+  fd.append('toc_enabled', radioValue('toc_enabled') || '1');
+  fd.append('toc_landscape', radioValue('toc_landscape') || '0');
+  fd.append('bookmarks_enabled', radioValue('bookmarks_enabled') || '1');
 
   const csvEl = document.getElementById('csv_file');
   if (csvEl && csvEl.files.length > 0) {
@@ -356,10 +416,12 @@ function startPolling(jobId) {
       setProgress(data.progress ?? 0, `${data.progress ?? 0}%`);
       renderFileProgress(data.files || []);
       renderStepProgress(data.step || null);
+      document.title = `${data.progress ?? 0}% — ${BASE_TITLE}`;
 
       if (data.status === 'complete') {
         stopPolling();
-        btnRun.disabled = false;
+        jobRunning = false;
+        updateRunEnabled();
         btnDownload.disabled = false;
         btnDownload.dataset.jobId = jobId;
         const missing = (data.failed_files || []).concat(data.skipped_files || []);
@@ -373,16 +435,24 @@ function startPolling(jobId) {
           appendLogLines([
             `[DONE] Job ${jobId} completed WITH MISSING CONTENT (${missing.length} file(s)).`,
           ]);
+          document.title = `${missing.length} file(s) missing — ${BASE_TITLE}`;
+          notifyFinished('Job completed with missing content',
+            `The output PDF is missing ${missing.length} file(s).`);
         } else {
           setProgress(100, '100% — Complete');
           appendLogLines([`[DONE] Job ${jobId} completed successfully.`]);
+          document.title = `Done — ${BASE_TITLE}`;
+          notifyFinished('Job complete', 'The compiled PDF is ready to download.');
         }
       } else if (data.status === 'error') {
         stopPolling();
-        btnRun.disabled = false;
+        jobRunning = false;
+        updateRunEnabled();
         jobErrorBox.textContent = data.error ?? 'An unknown error occurred.';
         jobErrorBox.classList.remove('hidden');
         setProgress(0, 'Error');
+        document.title = `Error — ${BASE_TITLE}`;
+        notifyFinished('Job failed', data.error ?? 'An unknown error occurred.');
       }
     } catch (fetchErr) {
       appendLogLines([`[ERR] Polling error: ${fetchErr.message}`]);
@@ -401,20 +471,42 @@ function stopPolling() {
   }
 }
 
-// ── Event: Run Job ────────────────────────────────────────────────────────────
+/**
+ * Desktop notification when a job finishes while the tab is in the
+ * background. Degrades silently when permission is denied/unsupported.
+ */
+function notifyFinished(title, body) {
+  try {
+    if (!('Notification' in window)) return;
+    if (!document.hidden) return;
+    if (Notification.permission === 'granted') {
+      new Notification(`${BASE_TITLE}: ${title}`, { body });
+    }
+  } catch (e) { /* notifications are best-effort */ }
+}
+
+// ── Event: Run job ────────────────────────────────────────────────────────────
 btnRun.addEventListener('click', async () => {
+  // Ask once for notification permission so the finish alert can fire later.
+  try {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  } catch (e) { /* best-effort */ }
+
   // Reset previous job state
   stopPolling();
   logLinesSeen = 0;
   logBody.textContent = '';
   setProgress(0, 'Starting…');
+  document.title = `0% — ${BASE_TITLE}`;
   renderFileProgress([]);
   renderStepProgress(null);
   jobErrorBox.classList.add('hidden');
   jobErrorBox.textContent = '';
-  btnRun.disabled = true;
+  jobRunning = true;
+  updateRunEnabled();
   btnDownload.disabled = true;
-  showProgressContainer();
 
   const fd = buildFormData();
 
@@ -432,7 +524,9 @@ btnRun.addEventListener('click', async () => {
       jobErrorBox.textContent = msg;
       jobErrorBox.classList.remove('hidden');
       setProgress(0, 'Error');
-      btnRun.disabled = false;
+      document.title = BASE_TITLE;
+      jobRunning = false;
+      updateRunEnabled();
       return;
     }
 
@@ -445,7 +539,9 @@ btnRun.addEventListener('click', async () => {
     jobErrorBox.textContent = err.message;
     jobErrorBox.classList.remove('hidden');
     setProgress(0, 'Error');
-    btnRun.disabled = false;
+    document.title = BASE_TITLE;
+    jobRunning = false;
+    updateRunEnabled();
   }
 });
 
@@ -573,3 +669,130 @@ btnClearLog.addEventListener('click', () => {
   logBody.textContent = '';
   logLinesSeen = 0;
 });
+
+// ── Log filter (all / problems) and copy ─────────────────────────────────────
+btnLogAll.addEventListener('click', () => {
+  logBody.classList.remove('problems-only');
+  btnLogAll.classList.add('active');
+  btnLogProblems.classList.remove('active');
+});
+
+btnLogProblems.addEventListener('click', () => {
+  logBody.classList.add('problems-only');
+  btnLogProblems.classList.add('active');
+  btnLogAll.classList.remove('active');
+});
+
+btnCopyLog.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(logBody.textContent);
+    const prev = btnCopyLog.textContent;
+    btnCopyLog.textContent = 'Copied';
+    setTimeout(() => { btnCopyLog.textContent = prev; }, 1500);
+  } catch (err) {
+    appendDirectLines([`[ERR] Copy failed: ${err.message}`]);
+  }
+});
+
+// ── Directory browse + inline validation ─────────────────────────────────────
+
+async function browseInto(input, kind) {
+  const btn = kind === 'rtf' ? btnBrowseRtf : btnBrowseOutput;
+  btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('initial', input.value.trim());
+    const resp = await fetch('/api/browse-directory', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (data.path) {
+      input.value = data.path;
+      validateDirectory(kind);
+    }
+  } catch (err) {
+    appendDirectLines([`[ERR] Browse failed: ${err.message}`]);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+btnBrowseRtf.addEventListener('click', () => browseInto(rtfDirInput, 'rtf'));
+btnBrowseOutput.addEventListener('click', () => browseInto(outputDirInput, 'output'));
+
+let validateSeq = 0;
+
+async function validateDirectory(kind) {
+  const input = kind === 'rtf' ? rtfDirInput : outputDirInput;
+  const status = kind === 'rtf' ? rtfDirStatus : outputDirStatus;
+  const value = input.value.trim();
+  const seq = ++validateSeq;
+
+  if (!value) {
+    status.textContent = '';
+    status.className = 'dir-status';
+    dirState[kind === 'rtf' ? 'rtfOk' : 'outOk'] = false;
+    updateRunEnabled();
+    return;
+  }
+
+  try {
+    const fd = new FormData();
+    fd.append('path', value);
+    fd.append('kind', kind);
+    const resp = await fetch('/api/inspect-directory', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (seq !== validateSeq) return;  // a newer validation superseded this one
+
+    if (kind === 'rtf') {
+      if (!data.exists) {
+        status.textContent = 'directory not found';
+        status.className = 'dir-status err';
+        dirState.rtfOk = false;
+      } else if (data.rtf_count === 0) {
+        status.textContent = 'no RTF files in this directory';
+        status.className = 'dir-status warn';
+        dirState.rtfOk = false;
+      } else {
+        status.textContent = `${data.rtf_count} RTF file(s) found`;
+        status.className = 'dir-status ok';
+        dirState.rtfOk = true;
+      }
+    } else {
+      if (!data.exists) {
+        status.textContent = 'will be created';
+        status.className = 'dir-status warn';
+      } else {
+        status.textContent = '';
+        status.className = 'dir-status';
+      }
+      dirState.outOk = true;  // non-empty is enough; the job creates it
+    }
+  } catch (err) {
+    if (seq !== validateSeq) return;
+    status.textContent = '';
+    status.className = 'dir-status';
+    // Validation service unreachable — don't block the user.
+    dirState[kind === 'rtf' ? 'rtfOk' : 'outOk'] = true;
+  }
+  updateRunEnabled();
+}
+
+let rtfDebounce = null;
+let outDebounce = null;
+
+rtfDirInput.addEventListener('input', () => {
+  clearTimeout(rtfDebounce);
+  rtfDebounce = setTimeout(() => validateDirectory('rtf'), 400);
+});
+
+outputDirInput.addEventListener('input', () => {
+  clearTimeout(outDebounce);
+  outDebounce = setTimeout(() => validateDirectory('output'), 400);
+});
+
+// ── ToC toggle ⇒ orientation availability ────────────────────────────────────
+document.getElementById('toc_enabled_yes').addEventListener('change', syncTocOrientation);
+document.getElementById('toc_enabled_no').addEventListener('change', syncTocOrientation);
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+syncTocOrientation();
+updateRunEnabled();

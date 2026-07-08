@@ -27,6 +27,8 @@ import base64
 import datetime
 import atexit
 import os
+import subprocess
+import sys
 import time
 import re
 import shutil
@@ -543,63 +545,69 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
 
         # ── Generate ToC (two-pass) ───────────────────────────────────────
         n_toc_entries = len(sections)
-        _append_log(job_id, f"[INFO] Generating Table of Contents ({n_toc_entries} entries)…")
-        plogger.log_info(f"ToC: building ({n_toc_entries} entries)")
-        # Read paper size from the first source RTF (more reliable than relying
-        # on LibreOffice to reproduce the exact dimensions in its PDF output).
-        # Fall back to the first merged page if RTF reading fails.
-        _rtf_size = _rtf_paper_size(file_list[0][0]) if file_list else None
-        if _rtf_size:
-            page_rect = fitz.Rect(0, 0, _rtf_size[0], _rtf_size[1])
-        else:
-            _raw_rect = merged_doc[0].rect if merged_doc.page_count > 0 else fitz.Rect(0, 0, 595, 842)
-            _w, _h = _raw_rect.width, _raw_rect.height
-            if _w > _h:
-                _w, _h = _h, _w
-            page_rect = fitz.Rect(0, 0, _w, _h)
-
-        if params.get("toc_landscape"):
-            page_rect = fitz.Rect(0, 0, page_rect.height, page_rect.width)
-            _append_log(job_id, "[INFO] ToC orientation: landscape")
-            plogger.log_info("ToC: landscape orientation enabled")
-
-        def _toc_progress(msg: str) -> None:
-            _append_log(job_id, msg)
-            plogger.log_info(msg)
-
-        # Two-pass build: estimates ToC page count then renders final text.
-        # Links cannot be embedded in the standalone toc_doc (it doesn't
-        # contain the content pages), so inject_toc_links() is called below
-        # on combined_doc after assembly.
-        toc_doc, toc_page_count = build_toc(sections, page_rect, progress_cb=_toc_progress)
-        _append_log(job_id, f"[INFO] ToC complete: {toc_page_count} page(s)")
-        plogger.log_info(f"ToC: {toc_page_count} page(s) generated")
-
-        # Prepend ToC pages into a fresh combined document
         content_pages = merged_doc.page_count
-        combined_doc, prepended = prepend_pages(merged_doc, toc_doc)
-        toc_doc.close()
-        merged_doc.close()
+        if not params.get("toc_enabled", True):
+            _append_log(job_id, "[INFO] ToC disabled — skipping")
+            plogger.log_info("ToC: disabled")
+            combined_doc = merged_doc
+            prepended = 0
+        else:
+            _append_log(job_id, f"[INFO] Generating Table of Contents ({n_toc_entries} entries)…")
+            plogger.log_info(f"ToC: building ({n_toc_entries} entries)")
+            # Read paper size from the first source RTF (more reliable than relying
+            # on LibreOffice to reproduce the exact dimensions in its PDF output).
+            # Fall back to the first merged page if RTF reading fails.
+            _rtf_size = _rtf_paper_size(file_list[0][0]) if file_list else None
+            if _rtf_size:
+                page_rect = fitz.Rect(0, 0, _rtf_size[0], _rtf_size[1])
+            else:
+                _raw_rect = merged_doc[0].rect if merged_doc.page_count > 0 else fitz.Rect(0, 0, 595, 842)
+                _w, _h = _raw_rect.width, _raw_rect.height
+                if _w > _h:
+                    _w, _h = _h, _w
+                page_rect = fitz.Rect(0, 0, _w, _h)
 
-        # Fail-safe: the combined document must contain every merged content
-        # page plus the ToC — any mismatch means pages were silently lost.
-        if combined_doc.page_count != content_pages + prepended:
-            raise RuntimeError(
-                f"page-count mismatch after assembly: expected "
-                f"{content_pages + prepended} pages "
-                f"({content_pages} content + {prepended} ToC), "
-                f"got {combined_doc.page_count}"
-            )
+            if params.get("toc_landscape"):
+                page_rect = fitz.Rect(0, 0, page_rect.height, page_rect.width)
+                _append_log(job_id, "[INFO] ToC orientation: landscape")
+                plogger.log_info("ToC: landscape orientation enabled")
 
-        # Shift section page indices to account for the prepended ToC pages
-        sections = shift_section_info(sections, prepended)
+            def _toc_progress(msg: str) -> None:
+                _append_log(job_id, msg)
+                plogger.log_info(msg)
 
-        # Inject clickable GOTO links into the ToC pages of combined_doc.
-        # sections now carry absolute page indices within combined_doc, so
-        # links are valid and point correctly to the first page of each section.
-        _append_log(job_id, f"[INFO] Injecting {n_toc_entries} ToC hyperlink(s)…")
-        plogger.log_info(f"ToC: injecting {n_toc_entries} hyperlinks")
-        inject_toc_links(combined_doc, sections, prepended, page_rect)
+            # Two-pass build: estimates ToC page count then renders final text.
+            # Links cannot be embedded in the standalone toc_doc (it doesn't
+            # contain the content pages), so inject_toc_links() is called below
+            # on combined_doc after assembly.
+            toc_doc, toc_page_count = build_toc(sections, page_rect, progress_cb=_toc_progress)
+            _append_log(job_id, f"[INFO] ToC complete: {toc_page_count} page(s)")
+            plogger.log_info(f"ToC: {toc_page_count} page(s) generated")
+
+            # Prepend ToC pages into a fresh combined document
+            combined_doc, prepended = prepend_pages(merged_doc, toc_doc)
+            toc_doc.close()
+            merged_doc.close()
+
+            # Fail-safe: the combined document must contain every merged content
+            # page plus the ToC — any mismatch means pages were silently lost.
+            if combined_doc.page_count != content_pages + prepended:
+                raise RuntimeError(
+                    f"page-count mismatch after assembly: expected "
+                    f"{content_pages + prepended} pages "
+                    f"({content_pages} content + {prepended} ToC), "
+                    f"got {combined_doc.page_count}"
+                )
+
+            # Shift section page indices to account for the prepended ToC pages
+            sections = shift_section_info(sections, prepended)
+
+            # Inject clickable GOTO links into the ToC pages of combined_doc.
+            # sections now carry absolute page indices within combined_doc, so
+            # links are valid and point correctly to the first page of each section.
+            _append_log(job_id, f"[INFO] Injecting {n_toc_entries} ToC hyperlink(s)…")
+            plogger.log_info(f"ToC: injecting {n_toc_entries} hyperlinks")
+            inject_toc_links(combined_doc, sections, prepended, page_rect)
 
         _update_job(job_id, progress=75)
 
@@ -649,18 +657,22 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
         _update_job(job_id, progress=88)
 
         # ── PDF Bookmarks ─────────────────────────────────────────────────
-        _append_log(job_id, "[INFO] Injecting PDF bookmarks…")
-        bookmark_entries = [
-            {
-                "title": s.title,
-                "table_number": s.table_number,
-                "page_index": s.start_page,
-                "level": 1,
-            }
-            for s in sections
-        ]
-        bm_toc = build_toc_list(bookmark_entries)
-        inject_bookmarks(combined_doc, bm_toc)
+        if not params.get("bookmarks_enabled", True):
+            _append_log(job_id, "[INFO] Bookmarks disabled — skipping")
+            plogger.log_info("Bookmarks: disabled")
+        else:
+            _append_log(job_id, "[INFO] Injecting PDF bookmarks…")
+            bookmark_entries = [
+                {
+                    "title": s.title,
+                    "table_number": s.table_number,
+                    "page_index": s.start_page,
+                    "level": 1,
+                }
+                for s in sections
+            ]
+            bm_toc = build_toc_list(bookmark_entries)
+            inject_bookmarks(combined_doc, bm_toc)
 
         _update_job(job_id, progress=92)
 
@@ -1002,6 +1014,87 @@ def api_generate_mapping_template() -> Response:
     xlsx_b64 = base64.b64encode(buf.getvalue()).decode()
 
     return jsonify({"log": log, "xlsx_base64": xlsx_b64})
+
+
+# ---------------------------------------------------------------------------
+# Directory helpers (browse dialog + inline validation)
+# ---------------------------------------------------------------------------
+
+# Only one native folder dialog at a time; a second request would spawn a
+# second dialog behind the first.
+_BROWSE_LOCK = threading.Lock()
+
+# Runs in a fresh subprocess: tkinter is not reliably re-usable across
+# threads inside a long-lived server process, but a one-shot process is.
+_FOLDER_PICKER_SNIPPET = (
+    "import sys, tkinter, tkinter.filedialog\n"
+    "root = tkinter.Tk()\n"
+    "root.withdraw()\n"
+    "root.attributes('-topmost', True)\n"
+    "kw = {'parent': root}\n"
+    "if len(sys.argv) > 1 and sys.argv[1]:\n"
+    "    kw['initialdir'] = sys.argv[1]\n"
+    "print(tkinter.filedialog.askdirectory(**kw) or '', end='')\n"
+)
+
+
+@app.route("/api/browse-directory", methods=["POST"])
+def api_browse_directory() -> Response:
+    """Open a native folder picker and return the chosen path.
+
+    The dialog opens on the server's screen — correct for this
+    single-operator app where server and browser share a machine.
+    Returns ``{"path": ""}`` when the user cancels.
+    """
+    if not _BROWSE_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A folder dialog is already open."}), 409
+    try:
+        initial = (request.form.get("initial") or "").strip()
+        proc = subprocess.run(
+            [sys.executable, "-c", _FOLDER_PICKER_SNIPPET, initial],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        path = (proc.stdout or "").strip()
+        # tkinter returns forward slashes on Windows; normalise for display.
+        if path:
+            path = str(Path(path))
+        return jsonify({"path": path})
+    except subprocess.TimeoutExpired:
+        return jsonify({"path": ""})
+    finally:
+        _BROWSE_LOCK.release()
+
+
+@app.route("/api/inspect-directory", methods=["POST"])
+def api_inspect_directory() -> Response:
+    """Read-only validation of a user-entered directory (never creates).
+
+    For ``kind=rtf`` also counts convertible RTF files using the same
+    dedup + temp-file filter as the job pipeline.
+    """
+    raw = (request.form.get("path") or "").strip()
+    kind = request.form.get("kind", "rtf")
+    if not raw:
+        return jsonify({"exists": False, "rtf_count": 0})
+    p = Path(raw)
+    try:
+        is_dir = p.is_dir()
+    except OSError:
+        is_dir = False
+    if not is_dir:
+        return jsonify({"exists": False, "rtf_count": 0})
+    rtf_count = 0
+    if kind == "rtf":
+        seen: set[str] = set()
+        for f in list(p.glob("*.rtf")) + list(p.glob("*.RTF")):
+            key = f.name.lower()
+            if key not in seen and not f.name.startswith(("~", ".")):
+                seen.add(key)
+                rtf_count += 1
+    return jsonify({"exists": True, "rtf_count": rtf_count})
 
 
 # ---------------------------------------------------------------------------

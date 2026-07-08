@@ -1,528 +1,435 @@
-/* ==========================================================================
-   style.css — RTF-to-PDF Compiler  |  Clean Light Theme
-   Font stack: Arial, then system sans-serif fallbacks.
-   Monospaced sections use "Consolas", then monospace fallbacks.
-   ========================================================================== */
+/* ============================================================================
+   RTF to PDF compiler — light professional theme
+   Layout: full-height 50/50 split — form column left, progress + log right.
+   Typography: Inter (vendored, static/fonts) for UI, Consolas for paths/log.
+   ========================================================================= */
 
-/* ── Reset & box model ───────────────────────────────────────────────────── */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@font-face {
+  font-family: "Inter";
+  src: url("/static/fonts/inter-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/static/fonts/inter-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/static/fonts/inter-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
 }
 
-/* ── Root design tokens ──────────────────────────────────────────────────── */
 :root {
-  /* Background layers */
-  --bg-shell:      #f0f0f0;   /* outer app background */
-  --bg-panel:      #ffffff;   /* panel background */
-  --bg-panel-hdr:  #e8e8e8;   /* panel header band */
-  --bg-input:      #ffffff;   /* text input background */
-  --bg-log:        #f8f8f8;   /* log pane background */
-  --bg-progress:   #0e639c;   /* progress bar fill */
+  --ink:        #1a1d21;
+  --paper:      #fafbfc;
+  --panel:      #ffffff;
+  --line:       #e3e7ea;
+  --line-soft:  #eef1f3;
+  --muted:      #667085;
+  --accent:     #2e5e87;
+  --accent-hov: #24496a;
+  --accent-soft:#eef3f8;
+  --ok:         #1a7f4b;
+  --warn:       #8a6100;
+  --err:        #b42318;
 
-  /* Borders */
-  --border:        #d0d0d0;
-  --border-focus:  #007fd4;
-
-  /* Text */
-  --text-primary:  #1e1e1e;
-  --text-muted:    #717171;
-  --text-subhdr:   #005fb8;   /* blue subheadings */
-  --text-label:    #3c3c3c;
-  --text-log:      #2d2d2d;   /* monospaced log text */
-  --text-error:    #c5161b;
-  --text-ok:       #1b7737;
-  --text-warn:     #7d5700;
-
-  /* Buttons */
-  --btn-primary-bg:   #0e639c;
-  --btn-primary-hover:#1177bb;
-  --btn-primary-text: #ffffff;
-  --btn-secondary-bg: #e8e8e8;
-  --btn-secondary-hover: #d4d4d4;
-
-  /* Fonts */
-  --font-ui:   Arial, "Helvetica Neue", Helvetica, sans-serif;
-  --font-mono: "Consolas", "Courier New", Courier, monospace;
-
-  /* Spacing */
-  --gap-sm:   8px;
-  --gap-md:   14px;
-  --gap-lg:   20px;
-  --radius:   3px;
+  --font-ui:   "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", "Courier New", monospace;
+  --radius: 6px;
 }
 
-/* ── Base ────────────────────────────────────────────────────────────────── */
-html, body {
-  height: 100%;
-  background-color: var(--bg-shell);
-  color: var(--text-primary);
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
   font-family: var(--font-ui);
   font-size: 13px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* ── App shell ───────────────────────────────────────────────────────────── */
-.app-shell {
+  color: var(--ink);
+  background: var(--paper);
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  max-width: 1280px;
+}
+
+.hidden { display: none !important; }
+
+/* ── Top bar ──────────────────────────────────────────────────────────── */
+.top-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 22px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.app-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.app-sub   { font-size: 12px; color: var(--muted); }
+
+/* ── Two-column shell ─────────────────────────────────────────────────── */
+.main-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px 22px 18px;
+  max-width: 1480px;
+  width: 100%;
   margin: 0 auto;
 }
 
-/* ── Top bar ─────────────────────────────────────────────────────────────── */
-.top-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-md);
-  padding: 10px 20px;
-  background: var(--bg-panel-hdr);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.app-title {
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.app-subtitle {
-  font-size: 11px;
-  color: var(--text-muted);
-  flex: 1;
-}
-
-.top-bar-actions {
-  display: flex;
-  gap: var(--gap-sm);
-  flex-shrink: 0;
-}
-
-/* ── Main content ────────────────────────────────────────────────────────── */
-.main-content {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  background: var(--border);
-  flex: 1;
-}
-
-/* ── Panel ───────────────────────────────────────────────────────────────── */
-.panel {
+.col-form {
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
+  gap: 12px;
+  padding-right: 2px;
+}
+.col-monitor {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.panel-header {
-  padding: 7px 16px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--text-subhdr);
-  background: var(--bg-panel-hdr);
-  border-bottom: 1px solid var(--border);
+/* ── Cards ────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px 13px;
+  flex-shrink: 0;
 }
-
-.panel-subheader {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  margin-bottom: var(--gap-sm);
-  padding-top: 2px;
-}
-
-.panel-body {
-  padding: var(--gap-lg);
-  overflow-y: auto;
-  flex: 1;
-}
-
-/* ── Form fields ─────────────────────────────────────────────────────────── */
-.field-group {
-  margin-bottom: var(--gap-md);
-}
-
-.field-label {
-  display: block;
-  font-size: 11px;
-  color: var(--text-label);
-  margin-bottom: 5px;
+.card-title {
+  font-size: 12px;
   font-weight: 600;
-}
-
-.field-hint {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 400;
-  margin-left: 6px;
-}
-
-.checkbox-label {
+  color: var(--ink);
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  margin-bottom: 0;
+  justify-content: space-between;
+  gap: 8px;
 }
+.title-note { font-weight: 400; color: var(--muted); font-size: 11.5px; }
 
-.checkbox-label input[type="checkbox"] {
-  margin: 0;
-  cursor: pointer;
-}
+/* ── Fields ───────────────────────────────────────────────────────────── */
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field + .field { margin-top: 9px; }
+.grid-3 .field, .adv-grid .field { margin-top: 0; }
+
+.f-label { font-size: 11.5px; color: var(--muted); }
+.f-label b { color: var(--ink); font-weight: 500; }
+.f-hint { font-size: 11.5px; color: var(--muted); font-weight: 400; }
 
 .field-input {
-  display: block;
-  width: 100%;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
   padding: 6px 8px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: 12px;
+  height: 30px;
+  width: 100%;
   outline: none;
-  transition: border-color 0.15s;
 }
+.field-input.mono { font-family: var(--font-mono); font-size: 12px; }
+.field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 
-.field-input:focus {
-  border-color: var(--border-focus);
+.field-input.file-input {
+  height: auto;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--muted);
 }
-
-.field-input.mono {
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.field-input.narrow {
-  width: 120px;
-}
-
-/* File inputs */
-.field-input[type="file"] {
-  padding: 4px 6px;
-  cursor: pointer;
-  color: var(--text-muted);
-}
-
-.field-input[type="file"]::-webkit-file-upload-button {
-  background: var(--btn-secondary-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 3px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  font-family: var(--font-ui);
-  margin-right: 8px;
-}
-
-/* Number inputs — remove browser spinners for a cleaner look */
-.field-input[type="number"]::-webkit-inner-spin-button,
-.field-input[type="number"]::-webkit-outer-spin-button {
-  opacity: 0.4;
-}
-
-/* Inline group (label + button side by side) */
-.inline-group {
-  display: flex;
-  gap: var(--gap-sm);
-  align-items: flex-end;
-}
-
-.inline-group .field-input {
-  flex: 1;
-}
-
-/* ── Grid layouts for H/F and coords ────────────────────────────────────── */
-.hf-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: var(--gap-sm);
-  margin-bottom: var(--gap-md);
-}
-
-.coords-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: var(--gap-sm);
-}
-
-/* ── Section divider ─────────────────────────────────────────────────────── */
-.section-divider {
-  height: 1px;
-  background: var(--border);
-  margin: var(--gap-lg) 0;
-}
-
-/* ── Buttons ─────────────────────────────────────────────────────────────── */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 16px;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
+.field-input.file-input::file-selector-button {
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 10px;
+  margin-right: 8px;
+  cursor: pointer;
+}
+.field-input.file-input::file-selector-button:hover { background: var(--line-soft); }
+
+.with-btn { display: flex; gap: 6px; }
+.with-btn .field-input { flex: 1 1 auto; }
+
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+
+/* Source and target: label-left rows sharing one input left edge */
+.src-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.src-row + .src-row { margin-top: 8px; }
+.src-label { padding-top: 8px; }  /* optically centers on the 30px input */
+.src-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.src-field .btn-row { margin-top: 2px; }
+
+/* Inline directory validation line */
+.dir-status { font-size: 11.5px; min-height: 15px; color: var(--muted); }
+.dir-status.ok   { color: var(--ok); }
+.dir-status.warn { color: var(--warn); }
+.dir-status.err  { color: var(--err); }
+
+.status-small { font-size: 11.5px; color: var(--ok); min-height: 15px; margin-top: 6px; }
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 6px 12px;
+  height: 30px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.12s, border-color 0.12s;
-  line-height: 1.4;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
 }
-
+.btn:hover { background: var(--line-soft); }
 .btn-primary {
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  border-color: var(--btn-primary-bg);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  padding: 8px 22px;
+  height: 34px;
+}
+.btn-primary:hover { background: var(--accent-hov); }
+.btn-sm { height: 26px; padding: 3px 10px; font-size: 12px; }
+.btn[disabled] { opacity: 0.45; cursor: default; }
+.btn[disabled]:hover { background: #fff; }
+.btn-primary[disabled]:hover { background: var(--accent); }
+
+.btn-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.field .btn-row { margin-top: 6px; }
+
+.seg-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  border-color: var(--accent);
 }
 
-.btn-primary:hover:not(:disabled) {
-  background: var(--btn-primary-hover);
-  border-color: var(--btn-primary-hover);
+/* ── Document options: segmented yes/no controls ──────────────────────── */
+.opt-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 18px;
+  align-items: center;
 }
+.opt-label { font-size: 12.5px; color: var(--ink); }
+.opt-label.disabled { opacity: 0.45; }
 
-.btn-secondary {
-  background: var(--btn-secondary-bg);
-  color: var(--text-primary);
-  border-color: var(--border);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--btn-secondary-hover);
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-muted);
-  border-color: transparent;
-  font-size: 11px;
-}
-
-.btn-ghost:hover {
-  color: var(--text-primary);
-  background: var(--bg-input);
-}
-
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 11px;
-}
-
-.btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-/* ── Progress bar ────────────────────────────────────────────────────────── */
-.progress-container {
-  margin-top: var(--gap-sm);
-}
-
-.progress-bar-track {
-  width: 100%;
-  height: 8px;
-  background: var(--bg-input);
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
   border-radius: 4px;
   overflow: hidden;
-  margin-bottom: 6px;
-  border: 1px solid var(--border);
+  width: max-content;
 }
+.seg label {
+  font-size: 12px;
+  padding: 4px 14px;
+  cursor: pointer;
+  color: var(--muted);
+  background: #fff;
+  border-left: 1px solid var(--line);
+  user-select: none;
+}
+.seg label:first-of-type { border-left: none; }
+.seg input { display: none; }
+.seg input:checked + label { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg.disabled { opacity: 0.45; pointer-events: none; }
 
+/* ── Advanced settings (collapsible) ──────────────────────────────────── */
+.card-details { padding: 0; }
+.card-details summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-details summary::-webkit-details-marker { display: none; }
+.card-details summary::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
+  margin-top: -2px;
+}
+.card-details[open] summary::before { transform: rotate(45deg); margin-top: -4px; }
+.card-details .adv-body {
+  padding: 11px 14px 13px;
+  border-top: 1px solid var(--line-soft);
+}
+.adv-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 8px; }
+.adv-actions { margin-top: 11px; }
+
+/* ── Action row ───────────────────────────────────────────────────────── */
+.actions { display: flex; gap: 8px; align-items: center; padding: 2px 2px 8px; flex-shrink: 0; }
+
+/* ── Right column: progress card ──────────────────────────────────────── */
+.card-progress { flex: 0 0 30%; min-height: 172px; overflow-y: auto; }
+
+.progress-bar-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line-soft);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
 .progress-bar-fill {
   height: 100%;
-  background: var(--bg-progress);
+  background: var(--accent);
   border-radius: 4px;
-  transition: width 0.3s ease;
+  transition: width 0.4s ease;
 }
-
 .progress-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
 }
 
-/* ── Per-file conversion progress (UNO mode) ─────────────────────────────── */
-.file-progress {
-  margin-top: var(--gap-sm);
-}
-
+.file-progress { margin-top: 10px; }
 .file-progress-summary {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
   margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px 40px 44px;
-  gap: var(--gap-sm);
+  grid-template-columns: minmax(0, 1fr) 110px 38px 42px;
+  gap: 8px;
   align-items: center;
   margin-bottom: 4px;
-}
-
-.file-row-clock {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  text-align: right;
   font-variant-numeric: tabular-nums;
 }
-
 .file-row-name {
-  font-size: 11px;
+  font-size: 11.5px;
   font-family: var(--font-mono);
-  color: var(--text-label);
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .file-bar-track {
   height: 6px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
+  background: var(--line-soft);
+  border: 1px solid var(--line);
   border-radius: 3px;
   overflow: hidden;
 }
-
 .file-bar-fill {
   height: 100%;
-  background: var(--bg-progress);
+  background: var(--accent);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
-
-.file-row-pct {
-  font-size: 10px;
-  color: var(--text-muted);
+.file-row-pct, .file-row-clock {
+  font-size: 10.5px;
+  color: var(--muted);
   font-family: var(--font-mono);
   text-align: right;
 }
 
-/* Indeterminate: converting but no progress signal yet (slot bootstrap or
-   CLI-fallback mode) — pulse the empty track. */
+/* Indeterminate: converting but no progress signal yet (slot bootstrap,
+   CLI fallback, or the final save) — pulse the empty track. */
 .file-row-indeterminate .file-bar-track {
   animation: file-bar-pulse 1.2s ease-in-out infinite;
 }
-
 @keyframes file-bar-pulse {
-  0%, 100% { background: var(--bg-input); }
-  50%      { background: var(--btn-secondary-hover); }
+  0%, 100% { background: var(--line-soft); }
+  50%      { background: var(--accent-soft); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .file-row-indeterminate .file-bar-track { animation: none; }
+  .progress-bar-fill, .file-bar-fill { transition: none; }
 }
 
 /* Failed: keep the row visible in red — content missing from the output. */
-.file-row-failed .file-bar-fill {
-  background: #c0392b;
-}
-
+.file-row-failed .file-bar-fill { background: var(--err); }
 .file-row-failed .file-row-name,
-.file-row-failed .file-row-pct {
-  color: #c0392b;
-  font-weight: 600;
-}
+.file-row-failed .file-row-pct { color: var(--err); font-weight: 600; }
 
-/* ── Error box ───────────────────────────────────────────────────────────── */
+/* ── Error / warning box ──────────────────────────────────────────────── */
 .error-box {
-  margin-top: var(--gap-sm);
+  margin-top: 10px;
   padding: 8px 10px;
-  background: rgba(197, 22, 27, 0.07);
-  border: 1px solid var(--text-error);
-  border-radius: var(--radius);
-  font-size: 11px;
-  color: var(--text-error);
-  font-family: var(--font-mono);
-  white-space: pre-wrap;
-  word-break: break-all;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--err);
+  background: #fdf3f2;
+  border: 1px solid #f0c8c4;
+  border-radius: 4px;
+  word-break: break-word;
 }
 
-/* Small status line (config load feedback) */
-.status-small {
-  font-size: 11px;
-  margin-top: 4px;
-  min-height: 14px;
-  color: var(--text-ok);
-  font-family: var(--font-mono);
-}
-
-/* ── Log panel ───────────────────────────────────────────────────────────── */
-.log-panel {
+/* ── Right column: log card ───────────────────────────────────────────── */
+.card-log {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-log);
-  border-top: 1px solid var(--border);
-  min-height: 200px;
-  max-height: 340px;
 }
-
-.log-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 16px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  background: var(--bg-panel-hdr);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
 .log-body {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 10px 16px;
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-log);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-/* Colour tokens applied by JS via data attributes on log lines */
-.log-body .log-err  { color: var(--text-error); }
-.log-body .log-ok   { color: var(--text-ok); }
-.log-body .log-warn { color: var(--text-warn); }
-.log-body .log-info { color: var(--text-muted); }
-
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: #b8b8b8;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #3d4550;
+  background: #fcfdfe;
+  border: 1px solid var(--line-soft);
   border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover { background: #999; }
-
-/* ── Button row (beneath a field, multiple side-by-side buttons) ─────────── */
-.btn-row {
-  display: flex;
-  gap: var(--gap-sm);
-  margin-top: 6px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-/* ── Utility ─────────────────────────────────────────────────────────────── */
-.hidden { display: none !important; }
+.log-err  { color: var(--err); }
+.log-ok   { color: var(--ok); }
+.log-warn { color: var(--warn); }
+.log-info { color: #3d4550; }
 
-/* ── Responsive: single column on narrow viewports ──────────────────────── */
-@media (max-width: 780px) {
-  .main-content {
-    grid-template-columns: 1fr;
-  }
-  .hf-grid,
-  .coords-grid {
-    grid-template-columns: 1fr;
-  }
+/* Problems filter: hide informational lines, keep warnings and errors. */
+.log-body.problems-only .log-info,
+.log-body.problems-only .log-ok { display: none; }
+
+/* ── Responsive fallback ──────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .main-content { grid-template-columns: 1fr; }
+  .col-form { overflow-y: visible; }
+  .col-monitor { min-height: 500px; }
 }

@@ -3,228 +3,227 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RTF-to-PDF Compiler</title>
+  <title>RTF to PDF compiler</title>
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
-  <div class="app-shell">
 
-    <!-- ══════════════════════════════════════════════════════════
-         TOP BAR
-    ═══════════════════════════════════════════════════════════ -->
-    <header class="top-bar">
-      <span class="app-title">RTF-TO-PDF COMPILER</span>
-      <div class="top-bar-actions">
-        <button class="btn btn-primary" id="btn-run" type="button">Run Job</button>
-        <button class="btn btn-secondary" id="btn-download" type="button" disabled>Download PDF</button>
-      </div>
-    </header>
+  <!-- ══════════════════════════════════════════════════════════
+       TOP BAR
+  ═══════════════════════════════════════════════════════════ -->
+  <header class="top-bar">
+    <span class="app-title">RTF to PDF compiler</span>
+    <span class="app-sub">merge clinical RTF outputs into a single navigable PDF</span>
+  </header>
 
-    <!-- ══════════════════════════════════════════════════════════
-         MAIN CONTENT
-    ═══════════════════════════════════════════════════════════ -->
-    <main class="main-content">
+  <!-- ══════════════════════════════════════════════════════════
+       MAIN — left: form · right: progress + log
+  ═══════════════════════════════════════════════════════════ -->
+  <main class="main-content">
 
-      <!-- Left column: Input configuration -->
-      <section class="panel" id="panel-input">
-        <div class="panel-header">INPUT CONFIGURATION</div>
-        <div class="panel-body">
+    <!-- ── Left column: form ─────────────────────────────────── -->
+    <div class="col-form">
 
-          <div class="panel-subheader">LOAD PREVIOUS CONFIG</div>
-          <div class="field-group">
-            <input
-              class="field-input"
-              type="file"
-              id="config_file"
-              name="config_file"
-              accept=".json"
-            />
-          </div>
-          <div id="config-load-status" class="status-small"></div>
+      <section class="card">
+        <div class="card-title">Load previous config <span class="title-note">optional</span></div>
+        <input class="field-input file-input" type="file" id="config_file" name="config_file" accept=".json" />
+        <div id="config-load-status" class="status-small"></div>
+      </section>
 
-          <div class="section-divider"></div>
+      <section class="card">
+        <div class="card-title">Source and target</div>
 
-          <div class="field-group">
-            <label class="field-label" for="rtf_directory">RTF Directory</label>
-            <input
-              class="field-input mono"
-              type="text"
-              id="rtf_directory"
-              name="rtf_directory"
-              placeholder="C:\data\rtf_files"
-            />
-          </div>
-
-          <div class="field-group">
-            <label class="field-label" for="output_directory">Output Directory</label>
-            <input
-              class="field-input mono"
-              type="text"
-              id="output_directory"
-              name="output_directory"
-              placeholder="C:\data\output"
-            />
-          </div>
-
-          <div class="field-group">
-            <label class="field-label" for="max_workers">Parallel workers
-              <span class="field-hint">(each soffice instance uses ~250 MB RAM)</span>
-            </label>
-            <input class="field-input mono narrow" type="number" step="1" min="1" max="32"
-                   id="max_workers" name="max_workers" value="8" />
-          </div>
-
-          <div class="field-group">
-            <label class="field-label" for="csv_file">
-              CSV Mapping
-              <span class="field-hint">(optional — columns: RTF_Filename, Table_Number, Title)</span>
-            </label>
-            <input
-              class="field-input"
-              type="file"
-              id="csv_file"
-              name="csv_file"
-              accept=".csv,.txt"
-            />
-            <div class="btn-row">
-              <a class="btn btn-secondary btn-sm" href="/api/sample-mapping-template" download>Sample Excel</a>
-              <button class="btn btn-secondary btn-sm" id="btn-generate-mapping" type="button">Generate from Directory</button>
-              <button class="btn btn-ghost btn-sm" id="btn-clear-csv" type="button">Clear</button>
+        <div class="src-row">
+          <label class="f-label src-label" for="rtf_directory">Input</label>
+          <div class="src-field">
+            <div class="with-btn">
+              <input class="field-input mono" type="text" id="rtf_directory" name="rtf_directory"
+                     placeholder="C:\data\rtf_files" />
+              <button class="btn" id="btn-browse-rtf" type="button">Browse</button>
             </div>
+            <div class="dir-status" id="rtf-dir-status"></div>
           </div>
+        </div>
 
-          <div class="field-group">
-            <label class="field-label checkbox-label" for="toc_landscape">
-              <input type="checkbox" id="toc_landscape" name="toc_landscape" />
-              Landscape ToC
-              <span class="field-hint">(more room for long titles)</span>
-            </label>
+        <div class="src-row">
+          <label class="f-label src-label" for="output_directory">Output</label>
+          <div class="src-field">
+            <div class="with-btn">
+              <input class="field-input mono" type="text" id="output_directory" name="output_directory"
+                     placeholder="C:\data\output" />
+              <button class="btn" id="btn-browse-output" type="button">Browse</button>
+            </div>
+            <div class="dir-status" id="output-dir-status"></div>
           </div>
+        </div>
 
-          <div class="section-divider"></div>
+        <div class="src-row">
+          <label class="f-label src-label" for="csv_file">CSV mapping</label>
+          <div class="src-field">
+            <input class="field-input file-input" type="file" id="csv_file" name="csv_file" accept=".csv,.txt" />
+            <div class="btn-row">
+              <a class="btn btn-sm" href="/api/sample-mapping-template" download>Sample Excel</a>
+              <button class="btn btn-sm" id="btn-generate-mapping" type="button">Generate from directory</button>
+              <button class="btn btn-sm" id="btn-clear-csv" type="button">Clear</button>
+            </div>
+            <div class="f-hint">optional; columns: RTF_Filename, Table_Number, Title</div>
+          </div>
+        </div>
+      </section>
 
-          <div class="panel-subheader">PAGE NUMBER OVERLAY COORDS</div>
-          <div class="coords-grid">
-            <div class="field-group">
-              <label class="field-label" for="page_number_right_margin_pts">Right margin (pts from right)</label>
-              <input class="field-input mono narrow" type="number" step="0.5"
+      <section class="card">
+        <div class="card-title">Header</div>
+        <div class="grid-3">
+          <div class="field">
+            <label class="f-label" for="header_left">Left</label>
+            <input class="field-input" type="text" id="header_left" name="header_left" />
+          </div>
+          <div class="field">
+            <label class="f-label" for="header_center">Center</label>
+            <input class="field-input" type="text" id="header_center" name="header_center" />
+          </div>
+          <div class="field">
+            <label class="f-label" for="header_right">Right</label>
+            <input class="field-input" type="text" id="header_right" name="header_right" />
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Footer</div>
+        <div class="grid-3">
+          <div class="field">
+            <label class="f-label" for="footer_left">Left</label>
+            <input class="field-input" type="text" id="footer_left" name="footer_left" />
+          </div>
+          <div class="field">
+            <label class="f-label" for="footer_center">Center</label>
+            <input class="field-input" type="text" id="footer_center" name="footer_center" />
+          </div>
+          <div class="field">
+            <label class="f-label" for="footer_right">Right</label>
+            <input class="field-input" type="text" id="footer_right" name="footer_right" />
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Document options</div>
+        <div class="opt-grid">
+          <span class="opt-label">Table of contents</span>
+          <span class="seg">
+            <input type="radio" name="toc_enabled" id="toc_enabled_yes" value="1" checked>
+            <label for="toc_enabled_yes">Yes</label>
+            <input type="radio" name="toc_enabled" id="toc_enabled_no" value="0">
+            <label for="toc_enabled_no">No</label>
+          </span>
+
+          <span class="opt-label" id="toc-orientation-label">ToC orientation</span>
+          <span class="seg" id="toc-orientation-seg">
+            <input type="radio" name="toc_landscape" id="toc_landscape_portrait" value="0" checked>
+            <label for="toc_landscape_portrait">Portrait</label>
+            <input type="radio" name="toc_landscape" id="toc_landscape_landscape" value="1">
+            <label for="toc_landscape_landscape">Landscape</label>
+          </span>
+
+          <span class="opt-label">Bookmarks</span>
+          <span class="seg">
+            <input type="radio" name="bookmarks_enabled" id="bookmarks_enabled_yes" value="1" checked>
+            <label for="bookmarks_enabled_yes">Yes</label>
+            <input type="radio" name="bookmarks_enabled" id="bookmarks_enabled_no" value="0">
+            <label for="bookmarks_enabled_no">No</label>
+          </span>
+        </div>
+      </section>
+
+      <details class="card card-details">
+        <summary>Advanced settings</summary>
+        <div class="adv-body">
+          <div class="adv-grid">
+            <div class="field">
+              <label class="f-label" for="header_top_margin_pts">Header top margin <b>pts</b></label>
+              <input class="field-input mono" type="number" step="0.5" min="0"
+                     id="header_top_margin_pts" name="header_top_margin_pts" value="28" />
+            </div>
+            <div class="field">
+              <label class="f-label" for="footer_bottom_margin_pts">Footer bottom margin <b>pts</b></label>
+              <input class="field-input mono" type="number" step="0.5" min="0"
+                     id="footer_bottom_margin_pts" name="footer_bottom_margin_pts" value="35" />
+            </div>
+            <div class="field">
+              <label class="f-label" for="max_workers">Parallel workers</label>
+              <input class="field-input mono" type="number" step="1" min="1" max="32"
+                     id="max_workers" name="max_workers" value="4" />
+            </div>
+            <div class="field">
+              <label class="f-label" for="page_number_right_margin_pts">Page number right margin <b>pts</b></label>
+              <input class="field-input mono" type="number" step="0.5"
                      id="page_number_right_margin_pts" name="page_number_right_margin_pts" value="55" />
             </div>
-            <div class="field-group">
-              <label class="field-label" for="page_number_bottom_margin_pts">Bottom margin (pts from bottom)</label>
-              <input class="field-input mono narrow" type="number" step="0.5"
+            <div class="field">
+              <label class="f-label" for="page_number_bottom_margin_pts">Page number bottom margin <b>pts</b></label>
+              <input class="field-input mono" type="number" step="0.5"
                      id="page_number_bottom_margin_pts" name="page_number_bottom_margin_pts" value="18" />
             </div>
-            <div class="field-group">
-              <label class="field-label" for="page_number_font_size">Font size (pts)</label>
-              <input class="field-input mono narrow" type="number" step="1" min="6" max="24"
+            <div class="field">
+              <label class="f-label" for="page_number_font_size">Page number font size <b>pts</b></label>
+              <input class="field-input mono" type="number" step="1" min="6" max="24"
                      id="page_number_font_size" name="page_number_font_size" value="8" />
             </div>
           </div>
-
+          <div class="btn-row adv-actions">
+            <button class="btn btn-sm" id="btn-preview-layout" type="button">Preview layout</button>
+            <span class="f-hint">opens a 2-page sample PDF with current margins</span>
+          </div>
         </div>
-      </section>
+      </details>
 
-      <!-- Right column: Headers / Footers -->
-      <section class="panel" id="panel-hdrftr">
-        <div class="panel-header">HEADER &amp; FOOTER</div>
-        <div class="panel-body">
-
-          <div class="panel-subheader">HEADER</div>
-
-          <div class="hf-grid">
-            <div class="field-group">
-              <label class="field-label" for="header_left">Left</label>
-              <input class="field-input" type="text" id="header_left" name="header_left" />
-            </div>
-            <div class="field-group">
-              <label class="field-label" for="header_center">Center</label>
-              <input class="field-input" type="text" id="header_center" name="header_center" />
-            </div>
-            <div class="field-group">
-              <label class="field-label" for="header_right">Right</label>
-              <input class="field-input" type="text" id="header_right" name="header_right" />
-            </div>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label" for="header_top_margin_pts">Header top margin (pts from top)</label>
-            <input class="field-input mono narrow" type="number" step="0.5" min="0"
-                   id="header_top_margin_pts" name="header_top_margin_pts" value="28" />
-          </div>
-
-          <div class="section-divider"></div>
-
-          <div class="panel-subheader">FOOTER</div>
-
-          <div class="hf-grid">
-            <div class="field-group">
-              <label class="field-label" for="footer_left">Left</label>
-              <input class="field-input" type="text" id="footer_left" name="footer_left" />
-            </div>
-            <div class="field-group">
-              <label class="field-label" for="footer_center">Center</label>
-              <input class="field-input" type="text" id="footer_center" name="footer_center" />
-            </div>
-            <div class="field-group">
-              <label class="field-label" for="footer_right">Right</label>
-              <input class="field-input" type="text" id="footer_right" name="footer_right" />
-            </div>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label" for="footer_bottom_margin_pts">Footer bottom margin (pts from bottom)</label>
-            <input class="field-input mono narrow" type="number" step="0.5" min="0"
-                   id="footer_bottom_margin_pts" name="footer_bottom_margin_pts" value="35" />
-          </div>
-
-          <div class="section-divider"></div>
-
-          <div class="btn-row">
-            <button class="btn btn-secondary btn-sm" id="btn-preview-layout" type="button">Preview Layout</button>
-          </div>
-
-          <div class="section-divider"></div>
-
-          <!-- Progress meter (shown only during run) -->
-          <div id="progress-container" class="progress-container hidden">
-            <div class="panel-subheader">JOB PROGRESS</div>
-            <div class="progress-bar-track">
-              <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
-            </div>
-            <div class="progress-label" id="progress-label">Idle</div>
-
-            <!-- Per-file conversion progress (UNO mode) -->
-            <div id="file-progress" class="file-progress hidden">
-              <div class="file-progress-summary" id="file-progress-summary"></div>
-              <div id="file-progress-list"></div>
-            </div>
-
-            <!-- Post-processing step progress (page numbers, final save…) -->
-            <div id="step-progress" class="file-progress hidden">
-              <div id="step-progress-row"></div>
-            </div>
-
-            <div id="job-error-box" class="error-box hidden"></div>
-          </div>
-
-        </div>
-      </section>
-
-    </main>
-
-    <!-- ══════════════════════════════════════════════════════════
-         PROCESS LOG
-    ═══════════════════════════════════════════════════════════ -->
-    <section class="log-panel">
-      <div class="log-header">
-        PROCESS LOG
-        <button class="btn btn-ghost btn-sm" id="btn-clear-log" type="button">Clear</button>
+      <div class="actions">
+        <button class="btn btn-primary" id="btn-run" type="button">Run job</button>
+        <button class="btn" id="btn-download" type="button" disabled>Download PDF</button>
       </div>
-      <pre class="log-body" id="log-body">Ready. Configure inputs and click Run Job.</pre>
-    </section>
 
-  </div><!-- /.app-shell -->
+    </div>
+
+    <!-- ── Right column: monitor ─────────────────────────────── -->
+    <div class="col-monitor">
+
+      <section class="card card-progress" id="progress-container">
+        <div class="card-title">Progress</div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
+        </div>
+        <div class="progress-label" id="progress-label">Idle</div>
+
+        <!-- Per-file conversion progress (UNO mode) -->
+        <div id="file-progress" class="file-progress hidden">
+          <div class="file-progress-summary" id="file-progress-summary"></div>
+          <div id="file-progress-list"></div>
+        </div>
+
+        <!-- Post-processing step progress (page numbers, final save…) -->
+        <div id="step-progress" class="file-progress hidden">
+          <div id="step-progress-row"></div>
+        </div>
+
+        <div id="job-error-box" class="error-box hidden"></div>
+      </section>
+
+      <section class="card card-log">
+        <div class="card-title">Process log
+          <span class="btn-row">
+            <button class="btn btn-sm seg-btn active" id="btn-log-all" type="button">All</button>
+            <button class="btn btn-sm seg-btn" id="btn-log-problems" type="button">Problems</button>
+            <button class="btn btn-sm" id="btn-copy-log" type="button">Copy</button>
+            <button class="btn btn-sm" id="btn-clear-log" type="button">Clear</button>
+          </span>
+        </div>
+        <pre class="log-body" id="log-body">Ready. Configure inputs and click Run job.</pre>
+      </section>
+
+    </div>
+
+  </main>
 
   <script src="/static/js/app.js"></script>
 </body>
