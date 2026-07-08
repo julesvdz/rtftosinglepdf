@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import base64
 import datetime
+import atexit
 import os
+import time
 import re
 import shutil
 import tempfile
@@ -54,11 +56,21 @@ from modules.bookmarks import build_toc_list, inject_bookmarks
 from modules.config_manager import build_params_from_form, load_config, save_config
 from modules.csv_handler import parse_csv, resolve_entries_against_directory
 from modules.header_footer import apply_headers_and_footers
-from modules.libreoffice import convert_rtf_to_pdf, find_soffice
+from modules.libreoffice import convert_rtf_to_pdf, find_soffice, _timeout_for
+from modules.uno_converter import (
+    UnoBootstrapError,
+    UnoSlot,
+    UnoSlotDied,
+    UnoTimeout,
+    find_lo_python,
+    force_rmtree,
+    kill_all_slots,
+    kill_stale_soffice,
+)
 from modules.page_numbering import apply_master_page_numbers
 from modules.pdf_merger import merge_pdfs, prepend_pages, shift_section_info
 from modules.process_logger import ProcessLogger
-from modules.rtf_parser import extract_title
+from modules.rtf_parser import extract_title, preprocess_rtf_placeholders
 from modules.toc_generator import build_toc, inject_toc_links
 import config as _cfg
 
@@ -93,6 +105,70 @@ def _append_log(job_id: str, line: str) -> None:
     ts = datetime.datetime.now().strftime("%H:%M:%S")
     with _JOBS_LOCK:
         JOBS[job_id]["log"].append(f"{ts}  {line}")
+
+
+def _update_file_state(job_id: str, idx: int, **kwargs: Any) -> None:
+    """Update one file's conversion state and recompute overall progress.
+
+    Overall progress derives from the mean per-file pct so the bar moves
+    smoothly during conversions (the 5-65% window of the pipeline).
+    """
+    with _JOBS_LOCK:
+        files = JOBS[job_id].get("files")
+        if not files:
+            return
+        files[idx].update(kwargs)
+        mean_pct = sum(f["pct"] for f in files) / len(files)
+        JOBS[job_id]["progress"] = 5 + int(60 * mean_pct / 100)
+
+
+def _set_step(job_id: str, label: str, pct: int | None = None) -> None:
+    """Mark the start of a post-processing step for the step-progress row.
+
+    ``pct=None`` renders as indeterminate (pulsing bar + stopwatch only) —
+    used for steps that cannot report granular progress (the final save).
+    """
+    with _JOBS_LOCK:
+        JOBS[job_id]["step"] = {"label": label, "pct": pct, "started": time.time()}
+
+
+def _clear_step(job_id: str) -> None:
+    with _JOBS_LOCK:
+        JOBS[job_id]["step"] = None
+
+
+def _step_progress(job_id: str, label: str, base: int, span: int, plogger):
+    """Build a ``cb(done, total)`` for per-page post-processing progress.
+
+    Interpolates the overall bar across ``[base, base + span]``, keeps the
+    step row's pct current, and emits throttled ``[PROG]`` log lines at
+    >=5% increments so large documents show pages remaining.
+    """
+    last_bucket = -1
+
+    def cb(done: int, total: int) -> None:
+        nonlocal last_bucket
+        total = max(total, 1)
+        pct = int(100 * done / total)
+        with _JOBS_LOCK:
+            job = JOBS[job_id]
+            job["progress"] = base + int(span * done / total)
+            step = job.get("step")
+            if step:
+                step["pct"] = pct
+        bucket = pct // 5
+        if bucket > last_bucket and done < total:
+            last_bucket = bucket
+            _append_log(job_id, f"[PROG] {label}: {done}/{total} pages ({pct}%)")
+            plogger.log_info(f"{label}: {done}/{total} pages")
+
+    return cb
+
+
+# Reap any persistent soffice services on clean interpreter exit (Ctrl+C,
+# werkzeug reloader). Hard kills still orphan them; stale profile dirs are
+# swept at the next job start.
+atexit.register(kill_all_slots)
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +228,20 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
         except RuntimeError as exc:
             raise RuntimeError(str(exc)) from exc
 
+        lo_python = find_lo_python(soffice) if _cfg.UNO_ENABLED else None
+        if lo_python:
+            _append_log(job_id, "[INFO] UNO progress mode enabled")
+            plogger.log_info(f"UNO mode: bundled python at {lo_python}")
+        else:
+            _append_log(
+                job_id,
+                "[WARN] UNO unavailable — falling back to CLI conversion "
+                "(no intra-file progress)",
+            )
+            plogger.log_info("UNO mode: unavailable, using CLI")
+
         # ── Resolve file list ────────────────────────────────────────────
+        skipped_files: list[str] = []  # CSV entries with no matching RTF
         if csv_file_path:
             _append_log(job_id, "[INFO] Parsing CSV mapping…")
             from modules.csv_handler import SectionEntry
@@ -162,10 +251,12 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                 (path, entry.title, entry.table_number)
                 for entry, path in resolved
             ]
-            # Warn about CSV entries with no matching file
+            # Warn about CSV entries with no matching file — these are
+            # content the user asked for that will NOT be in the output.
             resolved_names = {entry.rtf_filename for entry, _ in resolved}
             for entry in csv_entries:
                 if entry.rtf_filename not in resolved_names:
+                    skipped_files.append(entry.rtf_filename)
                     plogger.log_skip(
                         entry.rtf_filename,
                         "File not found in RTF directory",
@@ -208,7 +299,20 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
 
         total_files = len(file_list)
         _append_log(job_id, f"[INFO] {total_files} RTF file(s) queued for conversion.")
-        _update_job(job_id, progress=5)
+        _update_job(
+            job_id,
+            progress=5,
+            files=[
+                {
+                    "name": rtf_path.name,
+                    "size": rtf_path.stat().st_size,
+                    "status": "queued",
+                    "pct": 0,
+                    "elapsed": None,
+                }
+                for rtf_path, _, _ in file_list
+            ],
+        )
 
         # ── LibreOffice RTF → PDF conversion (parallel) ───────────────────
         n_workers = max(1, min(int(params.get("max_workers", _cfg.MAX_PARALLEL_CONVERSIONS)), total_files))
@@ -216,12 +320,30 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
 
         # Each soffice instance needs its own user-profile directory; without
         # isolation, concurrent instances corrupt each other's lock files.
-        profile_base = output_dir / "lo_profiles"
-        shutil.rmtree(profile_base, ignore_errors=True)
-        profile_base.mkdir()
+        # The base dir is per-job so a dir left locked by an orphaned soffice
+        # (app crash / reloader restart mid-job) can't collide with this run;
+        # stale bases from previous runs are swept best-effort.
+        n_orphans = kill_stale_soffice(
+            output_dir.resolve().as_uri() + "/lo_profiles_"
+        )
+        if n_orphans:
+            _append_log(
+                job_id,
+                f"[INFO] Killed {n_orphans} orphaned soffice process(es) "
+                "from a previous run",
+            )
+            time.sleep(0.5)  # let Windows release their profile-dir handles
+        for stale in output_dir.glob("lo_profiles*"):
+            force_rmtree(stale)
+        profile_base = output_dir / f"lo_profiles_{job_id[:8]}"
+        profile_base.mkdir(parents=True, exist_ok=True)
         profile_dirs = [profile_base / f"slot_{i}" for i in range(n_workers)]
         for pd in profile_dirs:
-            pd.mkdir()
+            pd.mkdir(exist_ok=True)
+
+        # Holds placeholder-rewritten RTF copies during conversion; removed
+        # in the finally below (no duplicates of source data left behind).
+        pre_dir = indiv_dir / "_preprocessed"
 
         # Thread-local slot assignment: each worker thread gets a stable slot
         # index and reuses the same profile directory for all its files.
@@ -236,20 +358,122 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                     _slot_counter["next"] += 1
             return _slot_local.slot  # type: ignore[return-value]
 
+        # One persistent soffice+helper pair per worker slot, created lazily
+        # by the slot's own worker thread (bootstrap overlaps with other
+        # slots' conversions). A None entry means the slot uses the CLI path.
+        slots: list[UnoSlot | None] = [None] * n_workers
+        slots_failed: list[bool] = [False] * n_workers
+
+        def _get_slot(slot_idx: int) -> UnoSlot | None:
+            if lo_python is None or slots_failed[slot_idx]:
+                return None
+            if slots[slot_idx] is None:
+                s = UnoSlot(
+                    slot_idx, soffice, lo_python, profile_dirs[slot_idx],
+                    log_cb=lambda msg: _append_log(job_id, msg),
+                )
+                try:
+                    s.start()
+                except UnoBootstrapError as exc:
+                    slots_failed[slot_idx] = True
+                    _append_log(
+                        job_id,
+                        f"[WARN] UNO slot {slot_idx} failed to start ({exc}); "
+                        "using CLI conversion for this worker",
+                    )
+                    return None
+                slots[slot_idx] = s
+            return slots[slot_idx]
+
         def _convert_one(
             idx: int, rtf_path: Path, title: str, table_num: str
         ) -> tuple[int, str | None, Exception | None]:
-            slot = _assign_slot()
+            slot_idx = _assign_slot()
+            _update_file_state(
+                job_id, idx, status="converting", pct=0, started=time.time()
+            )
             _append_log(job_id, f"[START] [file {idx + 1} of {total_files}] {rtf_path.name}")
+            t0 = time.monotonic()
+
+            def _finish(pdf_path_str: str | None, exc: Exception | None):
+                elapsed = round(time.monotonic() - t0, 1)
+                status = "done" if exc is None else "failed"
+                _update_file_state(job_id, idx, status=status, pct=100, elapsed=elapsed)
+                return (idx, pdf_path_str, exc)
+
             try:
-                pdf_path = convert_rtf_to_pdf(
-                    rtf_path, indiv_dir,
-                    soffice_path=soffice,
-                    user_profile_dir=profile_dirs[slot],
-                )
-                return (idx, str(pdf_path), None)
+                pdf_path = indiv_dir / (rtf_path.stem + ".pdf")
+                # Rewrite literal #{thispage}/#{lastpage} tokens into real
+                # PAGE/NUMPAGES fields (modified copy; source untouched).
+                src_path = preprocess_rtf_placeholders(rtf_path, pre_dir)
+                if src_path != rtf_path:
+                    _append_log(
+                        job_id,
+                        f"[INFO] {rtf_path.name}: replaced "
+                        "#{thispage}/#{lastpage} placeholders with page fields",
+                    )
+                # Infrastructure failures (soffice crash, hung conversion) are
+                # transient: restart the slot (or fall back to CLI) and retry
+                # this file ONCE. Document errors (unreadable RTF) are
+                # deterministic and are never retried.
+                last_exc: Exception | None = None
+                for attempt in (1, 2):
+                    slot = _get_slot(slot_idx)
+                    try:
+                        if slot is not None:
+                            slot.convert(
+                                src_path.resolve(), pdf_path.resolve(),
+                                timeout=_timeout_for(rtf_path),
+                                progress_cb=lambda pct, phase: _update_file_state(
+                                    job_id, idx, pct=pct
+                                ),
+                            )
+                            if not pdf_path.exists():
+                                raise RuntimeError(
+                                    "conversion reported success but no PDF was produced"
+                                )
+                        else:
+                            pdf_path = convert_rtf_to_pdf(
+                                src_path, indiv_dir,
+                                soffice_path=soffice,
+                                user_profile_dir=profile_dirs[slot_idx],
+                            )
+                        last_exc = None
+                        break
+                    except (UnoSlotDied, UnoTimeout) as exc:
+                        last_exc = exc
+                        _append_log(
+                            job_id,
+                            f"[WARN] UNO slot {slot_idx} died or hung; restarting…",
+                        )
+                        try:
+                            slot.restart()
+                        except UnoBootstrapError as boot_exc:
+                            slots[slot_idx] = None
+                            slots_failed[slot_idx] = True
+                            _append_log(
+                                job_id,
+                                f"[WARN] UNO slot {slot_idx} could not be "
+                                f"restarted ({boot_exc}); using CLI for this worker",
+                            )
+                        if attempt == 1:
+                            _append_log(
+                                job_id,
+                                f"[RETRY] [file {idx + 1} of {total_files}] "
+                                f"{rtf_path.name} — retrying after transient failure",
+                            )
+                            _update_file_state(job_id, idx, pct=0)
+                if last_exc is not None:
+                    return _finish(None, last_exc)
+                # Fail-safe: a "successful" conversion must yield a readable,
+                # non-empty PDF — a zero-page or corrupt output file would
+                # otherwise silently drop this section from the final PDF.
+                with fitz.open(str(pdf_path)) as _check:
+                    if _check.page_count == 0:
+                        raise RuntimeError("converted PDF has 0 pages")
+                return _finish(str(pdf_path), None)
             except Exception as exc:
-                return (idx, None, exc)
+                return _finish(None, exc)
 
         # Pre-allocated results list preserves original file_list order
         # regardless of completion order from the thread pool.
@@ -266,13 +490,9 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                         reverse=True,
                     )
                 }
-                completed_count = 0
                 for future in as_completed(future_to_idx):
                     orig_idx, pdf_path_str, exc = future.result()
                     rtf_path, title, table_num = file_list[orig_idx]
-                    completed_count += 1
-                    pct = 5 + int(60 * completed_count / total_files)
-                    _update_job(job_id, progress=pct)
                     file_tag = f"[file {orig_idx + 1} of {total_files}]"
                     if exc is not None:
                         plogger.log_conversion_error(rtf_path.name, exc)
@@ -286,11 +506,30 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                         plogger.log_info(f"Converted: {rtf_path.name}")
                         ok_count += 1
         finally:
-            shutil.rmtree(profile_base, ignore_errors=True)
+            # Kill persistent soffice services BEFORE removing their profile
+            # dirs — a live process holds the dir open and rmtree would
+            # silently leave litter behind.
+            for s in slots:
+                if s is not None:
+                    s.kill()
+            # Windows can hold profile-dir handles for a moment after the
+            # killed soffice processes exit, and LibreOffice leaves
+            # read-only files behind; force-delete with brief retries.
+            for _ in range(10):
+                force_rmtree(profile_base)
+                if not profile_base.exists():
+                    break
+                time.sleep(0.3)
+            shutil.rmtree(pre_dir, ignore_errors=True)
 
         # Rebuild in original order, skipping any failed files.
         converted: list[tuple[str, str, str, str]] = [
             r for r in results_by_index if r is not None
+        ]
+        failed_files: list[str] = [
+            file_list[i][0].name
+            for i, r in enumerate(results_by_index)
+            if r is None
         ]
 
         if not converted:
@@ -319,6 +558,11 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                 _w, _h = _h, _w
             page_rect = fitz.Rect(0, 0, _w, _h)
 
+        if params.get("toc_landscape"):
+            page_rect = fitz.Rect(0, 0, page_rect.height, page_rect.width)
+            _append_log(job_id, "[INFO] ToC orientation: landscape")
+            plogger.log_info("ToC: landscape orientation enabled")
+
         def _toc_progress(msg: str) -> None:
             _append_log(job_id, msg)
             plogger.log_info(msg)
@@ -332,9 +576,20 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
         plogger.log_info(f"ToC: {toc_page_count} page(s) generated")
 
         # Prepend ToC pages into a fresh combined document
+        content_pages = merged_doc.page_count
         combined_doc, prepended = prepend_pages(merged_doc, toc_doc)
         toc_doc.close()
         merged_doc.close()
+
+        # Fail-safe: the combined document must contain every merged content
+        # page plus the ToC — any mismatch means pages were silently lost.
+        if combined_doc.page_count != content_pages + prepended:
+            raise RuntimeError(
+                f"page-count mismatch after assembly: expected "
+                f"{content_pages + prepended} pages "
+                f"({content_pages} content + {prepended} ToC), "
+                f"got {combined_doc.page_count}"
+            )
 
         # Shift section page indices to account for the prepended ToC pages
         sections = shift_section_info(sections, prepended)
@@ -355,16 +610,40 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
 
         if has_hf:
             _append_log(job_id, "[INFO] Applying headers and footers…")
-            apply_headers_and_footers(combined_doc, hdr, ftr, overlay_config=params)
+            _set_step(job_id, "Applying headers & footers", pct=0)
+            t_step = time.monotonic()
+            apply_headers_and_footers(
+                combined_doc, hdr, ftr, overlay_config=params,
+                progress_cb=_step_progress(
+                    job_id, "Headers & footers", 75, 7, plogger
+                ),
+            )
+            _clear_step(job_id)
+            _append_log(
+                job_id,
+                f"[INFO] Headers and footers applied "
+                f"({combined_doc.page_count} pages in {time.monotonic() - t_step:.1f}s)",
+            )
 
         _update_job(job_id, progress=82)
 
         # ── Master page numbering overlay ─────────────────────────────────
         _append_log(job_id, "[INFO] Applying master page numbers…")
+        _set_step(job_id, "Applying master page numbers", pct=0)
+        t_step = time.monotonic()
         apply_master_page_numbers(
             combined_doc,
             toc_page_count=prepended,
             overlay_config=params,
+            progress_cb=_step_progress(
+                job_id, "Master page numbers", 82, 6, plogger
+            ),
+        )
+        _clear_step(job_id)
+        _append_log(
+            job_id,
+            f"[INFO] Master page numbers applied "
+            f"({combined_doc.page_count} pages in {time.monotonic() - t_step:.1f}s)",
         )
 
         _update_job(job_id, progress=88)
@@ -386,37 +665,108 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
         _update_job(job_id, progress=92)
 
         # ── Save final PDF ────────────────────────────────────────────────
+        # Write to a .partial name and atomically rename on success: a PDF
+        # at the final filename must ALWAYS be a finished file — the save
+        # can take minutes on large documents and must never be observable
+        # half-written at its final destination.
         output_pdf = output_dir / f"{pdf_stem}.pdf"
+        partial_pdf = output_dir / f"{pdf_stem}.pdf.partial"
         _append_log(job_id, f"[INFO] Writing PDF → {output_pdf.name}")
-        combined_doc.save(str(output_pdf), garbage=4, deflate=True, clean=True)
-        combined_doc.close()
+        _set_step(job_id, "Writing final PDF", pct=None)
+        t_step = time.monotonic()
+        try:
+            combined_doc.save(str(partial_pdf), garbage=4, deflate=True, clean=True)
+            combined_doc.close()
+            os.replace(partial_pdf, output_pdf)
+        finally:
+            if partial_pdf.exists():
+                try:
+                    partial_pdf.unlink()
+                except OSError:
+                    pass
+        _clear_step(job_id)
+        _append_log(
+            job_id,
+            f"[INFO] PDF written in {time.monotonic() - t_step:.1f}s",
+        )
 
-        # ── Log page ranges now that we know final positions ──────────────
+        # ── Log page ranges (UI in-memory lines only) ─────────────────────
         for s in sections:
-            plogger.log_conversion_ok(s.rtf_filename, s.master_start, s.master_end)
             _append_log(
                 job_id,
                 f"[PAGE] {s.rtf_filename} → master pages {s.master_start}–{s.master_end}",
             )
 
-        # ── Finalize process log (append summary + PASS/FAIL) ────────────────
-        plogger.flush(output_dir, total_files, filename_stem=log_stem)
-        _append_log(job_id, f"[INFO] Log finalized → {log_path.name}")
+        missing = failed_files + skipped_files
+        if missing:
+            _append_log(
+                job_id,
+                f"[WARN] OUTPUT PDF IS MISSING CONTENT — "
+                f"{len(failed_files)} failed, {len(skipped_files)} skipped: "
+                + ", ".join(missing),
+            )
+        _append_log(job_id, f"[DONE] Compiled {ok_count}/{total_files} RTF files.")
 
+        # The final PDF is at its final name — the job is complete NOW.
+        # Nothing after this point may block completion.
         _update_job(
             job_id,
             status="complete",
             progress=100,
             pdf_path=str(output_pdf),
+            failed_files=failed_files,
+            skipped_files=skipped_files,
+            step=None,
         )
-        _append_log(job_id, f"[DONE] Compiled {ok_count}/{total_files} RTF files.")
+
+        # ── Audit tail: process-log disk writes, guarded ──────────────────
+        # These are the only remaining disk operations, and a blocked file
+        # open (AV/DLP scanning freshly written output) once left a finished
+        # job stuck at 92% — run them in a bounded side thread instead.
+        fin_error: list[str] = []
+
+        def _finalize_process_log() -> None:
+            try:
+                for s in sections:
+                    plogger.log_conversion_ok(
+                        s.rtf_filename, s.master_start, s.master_end
+                    )
+                if missing:
+                    plogger.log_info(
+                        "WARNING: output PDF is missing content from: "
+                        + ", ".join(missing)
+                    )
+                plogger.flush(output_dir, total_files, filename_stem=log_stem)
+            except Exception as flush_exc:
+                fin_error.append(f"{type(flush_exc).__name__}: {flush_exc}")
+
+        fin = threading.Thread(target=_finalize_process_log, daemon=True)
+        fin.start()
+        fin.join(timeout=30)
+        if fin.is_alive():
+            _append_log(
+                job_id,
+                "[WARN] Process log finalization did not complete within 30s "
+                "(blocked disk write?) — the output PDF is unaffected.",
+            )
+        elif fin_error:
+            _append_log(
+                job_id,
+                f"[WARN] Process log finalization failed ({fin_error[0]}) — "
+                "the output PDF is unaffected.",
+            )
+        else:
+            _append_log(job_id, f"[INFO] Log finalized → {log_path.name}")
 
     except Exception as exc:
         tb = traceback.format_exc()
-        _update_job(job_id, status="error", error=str(exc))
+        _update_job(job_id, status="error", error=str(exc), step=None)
         _append_log(job_id, f"[FATAL] {exc}")
         _append_log(job_id, tb)
-        plogger.log_info(f"FATAL: {exc}")
+        try:
+            plogger.log_info(f"FATAL: {exc}")
+        except Exception:
+            pass  # log-file trouble must not mask the real error
         try:
             output_dir = Path(params.get("output_directory", "."))
             err_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -441,6 +791,12 @@ def api_run() -> Response:
     Accepts multipart/form-data.
     Returns: {"job_id": "<uuid>"}
     """
+    # Single-operator app: overlapping jobs would spawn a second fleet of
+    # persistent soffice services (memory) and interleave their logs.
+    with _JOBS_LOCK:
+        if any(j["status"] == "running" for j in JOBS.values()):
+            return jsonify({"error": "Another job is already running."}), 409
+
     try:
         params = build_params_from_form(request.form)
     except Exception as exc:
@@ -475,6 +831,7 @@ def api_run() -> Response:
             "log": [],
             "pdf_path": None,
             "error": None,
+            "step": None,
         }
 
     thread = threading.Thread(
@@ -501,16 +858,34 @@ def api_status(job_id: str) -> Response:
     """
     with _JOBS_LOCK:
         job = JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found."}), 404
+        now = time.time()
+        files_payload = []
+        for f in job.get("files", []):
+            d = dict(f)
+            # Live stopwatch: seconds this file has been converting, computed
+            # server-side so the client needs no clock synchronisation.
+            if d.get("status") == "converting" and d.get("started"):
+                d["running"] = round(now - d["started"], 1)
+            files_payload.append(d)
+        step = job.get("step")
+        step_payload = None
+        if step:
+            step_payload = dict(step)
+            step_payload["running"] = round(now - step_payload.pop("started"), 1)
+        payload = {
+            "status":   job["status"],
+            "progress": job["progress"],
+            "log":      list(job["log"]),
+            "error":    job.get("error"),
+            "files":    files_payload,
+            "step":     step_payload,
+            "failed_files":  list(job.get("failed_files", [])),
+            "skipped_files": list(job.get("skipped_files", [])),
+        }
 
-    if not job:
-        return jsonify({"error": "Job not found."}), 404
-
-    return jsonify({
-        "status":   job["status"],
-        "progress": job["progress"],
-        "log":      job["log"],
-        "error":    job.get("error"),
-    })
+    return jsonify(payload)
 
 
 @app.route("/api/load-config", methods=["POST"])
@@ -780,4 +1155,8 @@ def api_sample_mapping_template() -> Response:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000, threaded=True)
+    # debug=False: the werkzeug reloader restarts the process on any source
+    # edit, killing running job threads mid-conversion, and debug mode
+    # exposes the interactive debugger on 0.0.0.0. Enable manually for
+    # development only.
+    app.run(debug=False, host="0.0.0.0", port=5000, threaded=True)

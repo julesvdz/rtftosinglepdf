@@ -14,7 +14,7 @@ JSON config) via the `overlay_config` parameter.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import fitz  # PyMuPDF
 
@@ -29,6 +29,7 @@ def apply_master_page_numbers(
     doc: fitz.Document,
     toc_page_count: int = 0,
     overlay_config: dict[str, Any] | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> None:
     """Stamp "Page X of Y" on every page of *doc* in-place.
 
@@ -50,6 +51,10 @@ def apply_master_page_numbers(
           - ``page_number_bottom_margin_pts`` (float) — pts from bottom of page
           - ``page_number_right_margin_pts``  (float) — pts from right edge of page
           - ``page_number_font_size``         (int)
+    progress_cb:
+        Optional ``cb(pages_done, total_pages)`` invoked periodically during
+        the stamping loop (throttled to ~200 calls per document) so callers
+        can surface per-page progress on large documents.
     """
     cfg = overlay_config or {}
 
@@ -62,6 +67,7 @@ def apply_master_page_numbers(
     color: tuple = config.PAGE_NUMBER_COLOR
 
     total_pages: int = doc.page_count
+    report_every = max(1, total_pages // 200)
 
     for page_idx in range(total_pages):
         page = doc[page_idx]
@@ -75,6 +81,9 @@ def apply_master_page_numbers(
             font_size=font_size,
             color=color,
         )
+        done = page_idx + 1
+        if progress_cb and (done % report_every == 0 or done == total_pages):
+            progress_cb(done, total_pages)
 
 
 # ---------------------------------------------------------------------------

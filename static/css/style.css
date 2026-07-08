@@ -166,6 +166,19 @@ html, body {
   margin-left: 6px;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.checkbox-label input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
 .field-input {
   display: block;
   width: 100%;
@@ -336,6 +349,87 @@ html, body {
   font-size: 11px;
   color: var(--text-muted);
   font-family: var(--font-mono);
+}
+
+/* ── Per-file conversion progress (UNO mode) ─────────────────────────────── */
+.file-progress {
+  margin-top: var(--gap-sm);
+}
+
+.file-progress-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 40px 44px;
+  gap: var(--gap-sm);
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.file-row-clock {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-row-name {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-bar-track {
+  height: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.file-bar-fill {
+  height: 100%;
+  background: var(--bg-progress);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.file-row-pct {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/* Indeterminate: converting but no progress signal yet (slot bootstrap or
+   CLI-fallback mode) — pulse the empty track. */
+.file-row-indeterminate .file-bar-track {
+  animation: file-bar-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes file-bar-pulse {
+  0%, 100% { background: var(--bg-input); }
+  50%      { background: var(--btn-secondary-hover); }
+}
+
+/* Failed: keep the row visible in red — content missing from the output. */
+.file-row-failed .file-bar-fill {
+  background: #c0392b;
+}
+
+.file-row-failed .file-row-name,
+.file-row-failed .file-row-pct {
+  color: #c0392b;
+  font-weight: 600;
 }
 
 /* ── Error box ───────────────────────────────────────────────────────────── */

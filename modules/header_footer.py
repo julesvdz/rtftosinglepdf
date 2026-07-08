@@ -21,7 +21,7 @@ override them at runtime.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import fitz  # PyMuPDF
 
@@ -44,6 +44,7 @@ def apply_headers_and_footers(
     header: dict[str, str],
     footer: dict[str, str],
     overlay_config: dict[str, Any] | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> None:
     """Stamp header and footer text on every page of *doc* in-place.
 
@@ -61,6 +62,10 @@ def apply_headers_and_footers(
           - ``header_y_pts``  (float) — Y position of header text
           - ``footer_y_pts``  (float) — Y position of footer text
         Falls back to config.py defaults when not supplied.
+    progress_cb:
+        Optional ``cb(pages_done, total_pages)`` invoked periodically during
+        the stamping loop (throttled to ~200 calls per document) so callers
+        can surface per-page progress on large documents.
     """
     cfg = overlay_config or {}
 
@@ -73,7 +78,10 @@ def apply_headers_and_footers(
     font_size: int = config.HEADER_FOOTER_FONT_SIZE
     color: tuple = config.HEADER_FOOTER_COLOR
 
-    for page in doc:
+    total_pages: int = doc.page_count
+    report_every = max(1, total_pages // 200)
+
+    for page_idx, page in enumerate(doc):
         page_width: float = page.rect.width
         page_height: float = page.rect.height
 
@@ -102,6 +110,10 @@ def apply_headers_and_footers(
             font_size=font_size,
             color=color,
         )
+
+        done = page_idx + 1
+        if progress_cb and (done % report_every == 0 or done == total_pages):
+            progress_cb(done, total_pages)
 
 
 # ---------------------------------------------------------------------------

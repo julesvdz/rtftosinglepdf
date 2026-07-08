@@ -93,6 +93,14 @@
             </div>
           </div>
 
+          <div class="field-group">
+            <label class="field-label checkbox-label" for="toc_landscape">
+              <input type="checkbox" id="toc_landscape" name="toc_landscape" />
+              Landscape ToC
+              <span class="field-hint">(more room for long titles)</span>
+            </label>
+          </div>
+
           <div class="section-divider"></div>
 
           <div class="panel-subheader">PAGE NUMBER OVERLAY COORDS</div>
@@ -185,6 +193,18 @@
               <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
             </div>
             <div class="progress-label" id="progress-label">Idle</div>
+
+            <!-- Per-file conversion progress (UNO mode) -->
+            <div id="file-progress" class="file-progress hidden">
+              <div class="file-progress-summary" id="file-progress-summary"></div>
+              <div id="file-progress-list"></div>
+            </div>
+
+            <!-- Post-processing step progress (page numbers, final save…) -->
+            <div id="step-progress" class="file-progress hidden">
+              <div id="step-progress-row"></div>
+            </div>
+
             <div id="job-error-box" class="error-box hidden"></div>
           </div>
 

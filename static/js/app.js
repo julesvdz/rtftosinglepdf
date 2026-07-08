@@ -26,10 +26,16 @@ const progressBarFill   = document.getElementById('progress-bar-fill');
 const progressLabel     = document.getElementById('progress-label');
 const jobErrorBox       = document.getElementById('job-error-box');
 const configLoadStatus  = document.getElementById('config-load-status');
+const fileProgress        = document.getElementById('file-progress');
+const fileProgressSummary = document.getElementById('file-progress-summary');
+const fileProgressList    = document.getElementById('file-progress-list');
+const stepProgress        = document.getElementById('step-progress');
+const stepProgressRow     = document.getElementById('step-progress-row');
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let activeJobId   = null;
 let pollTimer     = null;
+let clockTimer    = null;
 let logLinesSeen  = 0;   // track how many log lines we have already rendered
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -97,6 +103,131 @@ function setProgress(pct, label) {
   progressLabel.textContent = label ?? `${pct}%`;
 }
 
+/** Format seconds as a M:SS stopwatch string (e.g. 83.4 -> "1:23"). */
+function fmtClock(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Advance every live stopwatch between polls: each clock element carries the
+ * server-reported elapsed seconds plus the client time it was rendered, so
+ * the display ticks smoothly at 1 Hz while re-anchoring on every poll.
+ */
+function tickClocks() {
+  document.querySelectorAll('.file-row-clock[data-run]').forEach(el => {
+    const base = parseFloat(el.dataset.run);
+    const at = parseInt(el.dataset.at, 10);
+    el.textContent = fmtClock(base + (Date.now() - at) / 1000);
+  });
+}
+
+/**
+ * Render the per-file conversion panel: a summary line plus one progress
+ * row per file currently converting (bounded by the worker count).
+ */
+function renderFileProgress(files) {
+  if (!files.length) {
+    fileProgress.classList.add('hidden');
+    return;
+  }
+  fileProgress.classList.remove('hidden');
+
+  const counts = { queued: 0, converting: 0, done: 0, failed: 0 };
+  files.forEach(f => { counts[f.status] = (counts[f.status] ?? 0) + 1; });
+  fileProgressSummary.textContent =
+    `${counts.done} done · ${counts.failed} failed · ` +
+    `${counts.converting} converting · ${counts.queued} queued (of ${files.length})`;
+
+  fileProgressList.textContent = '';
+  files.forEach(f => {
+    // Converting files get a live bar; failed files stay visible in red so
+    // missing content can never scroll silently out of sight.
+    if (f.status !== 'converting' && f.status !== 'failed') return;
+    const failed = f.status === 'failed';
+    const row = document.createElement('div');
+    row.className = 'file-row'
+      + (failed ? ' file-row-failed'
+                : (f.pct === 0 ? ' file-row-indeterminate' : ''));
+
+    const name = document.createElement('div');
+    name.className = 'file-row-name';
+    name.textContent = f.name;
+    name.title = f.name;
+
+    const track = document.createElement('div');
+    track.className = 'file-bar-track';
+    const fill = document.createElement('div');
+    fill.className = 'file-bar-fill';
+    fill.style.width = (failed ? 100 : f.pct) + '%';
+    track.appendChild(fill);
+
+    const pct = document.createElement('div');
+    pct.className = 'file-row-pct';
+    pct.textContent = failed ? 'FAILED' : f.pct + '%';
+
+    // Stopwatch: live M:SS for converting files (ticked by tickClocks
+    // between polls), final elapsed time for failed ones.
+    const clock = document.createElement('div');
+    clock.className = 'file-row-clock';
+    if (failed) {
+      clock.textContent = f.elapsed != null ? fmtClock(f.elapsed) : '';
+    } else {
+      clock.dataset.run = f.running ?? 0;
+      clock.dataset.at = Date.now();
+      clock.textContent = fmtClock(f.running ?? 0);
+    }
+
+    row.append(name, track, pct, clock);
+    fileProgressList.appendChild(row);
+  });
+}
+
+/**
+ * Render the post-processing step row (page numbering, final save…):
+ * label | bar | pct | live M:SS stopwatch. `step.pct === null` renders as
+ * indeterminate (pulsing bar) for steps that cannot report granular
+ * progress. Hidden whenever no step is active.
+ */
+function renderStepProgress(step) {
+  if (!step) {
+    stepProgress.classList.add('hidden');
+    stepProgressRow.textContent = '';
+    return;
+  }
+  stepProgress.classList.remove('hidden');
+  stepProgressRow.textContent = '';
+
+  const indeterminate = step.pct == null;
+  const row = document.createElement('div');
+  row.className = 'file-row' + (indeterminate ? ' file-row-indeterminate' : '');
+
+  const name = document.createElement('div');
+  name.className = 'file-row-name';
+  name.textContent = step.label;
+  name.title = step.label;
+
+  const track = document.createElement('div');
+  track.className = 'file-bar-track';
+  const fill = document.createElement('div');
+  fill.className = 'file-bar-fill';
+  fill.style.width = (indeterminate ? 0 : step.pct) + '%';
+  track.appendChild(fill);
+
+  const pct = document.createElement('div');
+  pct.className = 'file-row-pct';
+  pct.textContent = indeterminate ? '…' : step.pct + '%';
+
+  const clock = document.createElement('div');
+  clock.className = 'file-row-clock';
+  clock.dataset.run = step.running ?? 0;
+  clock.dataset.at = Date.now();
+  clock.textContent = fmtClock(step.running ?? 0);
+
+  row.append(name, track, pct, clock);
+  stepProgressRow.appendChild(row);
+}
+
 function showProgressContainer() {
   progressContainer.classList.remove('hidden');
 }
@@ -112,6 +243,11 @@ function resetUI() {
   btnDownload.dataset.jobId = '';
   activeJobId = null;
   progressContainer.classList.add('hidden');
+  fileProgress.classList.add('hidden');
+  fileProgressSummary.textContent = '';
+  fileProgressList.textContent = '';
+  stepProgress.classList.add('hidden');
+  stepProgressRow.textContent = '';
 }
 
 // ── Field mapping ─────────────────────────────────────────────────────────────
@@ -131,6 +267,7 @@ const FIELD_MAP = [
   ['page_number_bottom_margin_pts', 'page_number_bottom_margin_pts'],
   ['page_number_font_size',         'page_number_font_size'],
   ['max_workers',                   'max_workers'],
+  ['toc_landscape',                 'toc_landscape'],
 ];
 
 function populateFieldsFromConfig(cfg) {
@@ -152,12 +289,17 @@ function populateFieldsFromConfig(cfg) {
     page_number_bottom_margin_pts: cfg.page_number_bottom_margin_pts ?? 18,
     page_number_font_size:         cfg.page_number_font_size         ?? 8,
     max_workers:                   cfg.max_workers                   ?? 8,
+    toc_landscape:                 cfg.toc_landscape                 ?? false,
   };
 
   for (const [fieldId, _] of FIELD_MAP) {
     const el = document.getElementById(fieldId);
     if (el && valueMap[fieldId] !== undefined) {
-      el.value = valueMap[fieldId];
+      if (el.type === 'checkbox') {
+        el.checked = !!valueMap[fieldId];
+      } else {
+        el.value = valueMap[fieldId];
+      }
     }
   }
 
@@ -184,6 +326,9 @@ function buildFormData() {
     if (el) fd.append(id, el.value);
   });
 
+  const tocLandscapeEl = document.getElementById('toc_landscape');
+  if (tocLandscapeEl) fd.append('toc_landscape', tocLandscapeEl.checked ? '1' : '0');
+
   const csvEl = document.getElementById('csv_file');
   if (csvEl && csvEl.files.length > 0) {
     fd.append('csv_file', csvEl.files[0]);
@@ -195,6 +340,8 @@ function buildFormData() {
 // ── Polling ───────────────────────────────────────────────────────────────────
 function startPolling(jobId) {
   if (pollTimer) clearInterval(pollTimer);
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = setInterval(tickClocks, 1000);
 
   pollTimer = setInterval(async () => {
     try {
@@ -207,14 +354,29 @@ function startPolling(jobId) {
 
       appendLogLines(data.log || []);
       setProgress(data.progress ?? 0, `${data.progress ?? 0}%`);
+      renderFileProgress(data.files || []);
+      renderStepProgress(data.step || null);
 
       if (data.status === 'complete') {
         stopPolling();
-        setProgress(100, '100% — Complete');
         btnRun.disabled = false;
         btnDownload.disabled = false;
         btnDownload.dataset.jobId = jobId;
-        appendLogLines([`[DONE] Job ${jobId} completed successfully.`]);
+        const missing = (data.failed_files || []).concat(data.skipped_files || []);
+        if (missing.length) {
+          // The output PDF exists but content is missing — say so loudly.
+          setProgress(100, `100% — ${missing.length} FILE(S) MISSING`);
+          jobErrorBox.textContent =
+            `Warning: the output PDF is MISSING content from ` +
+            `${missing.length} file(s): ${missing.join(', ')}`;
+          jobErrorBox.classList.remove('hidden');
+          appendLogLines([
+            `[DONE] Job ${jobId} completed WITH MISSING CONTENT (${missing.length} file(s)).`,
+          ]);
+        } else {
+          setProgress(100, '100% — Complete');
+          appendLogLines([`[DONE] Job ${jobId} completed successfully.`]);
+        }
       } else if (data.status === 'error') {
         stopPolling();
         btnRun.disabled = false;
@@ -233,6 +395,10 @@ function stopPolling() {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  if (clockTimer) {
+    clearInterval(clockTimer);
+    clockTimer = null;
+  }
 }
 
 // ── Event: Run Job ────────────────────────────────────────────────────────────
@@ -242,6 +408,8 @@ btnRun.addEventListener('click', async () => {
   logLinesSeen = 0;
   logBody.textContent = '';
   setProgress(0, 'Starting…');
+  renderFileProgress([]);
+  renderStepProgress(null);
   jobErrorBox.classList.add('hidden');
   jobErrorBox.textContent = '';
   btnRun.disabled = true;

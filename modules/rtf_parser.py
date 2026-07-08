@@ -33,6 +33,43 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# Placeholder preprocessing
+# ---------------------------------------------------------------------------
+
+# Some RTF generators emit literal placeholder text instead of real page
+# fields; LibreOffice renders those tokens verbatim. Rewrite them into the
+# exact field constructs sibling files use so both render actual numbers.
+_PLACEHOLDER_FIELDS: list[tuple[bytes, bytes]] = [
+    (rb"#\{thispage\}", rb"{\field{\*\fldinst { PAGE }}}"),
+    (rb"#\{lastpage\}", rb"{\field{\*\fldinst { NUMPAGES }}}"),
+]
+
+
+def preprocess_rtf_placeholders(rtf_path: str | Path, work_dir: str | Path) -> Path:
+    """Replace literal ``#\\{thispage\\}``/``#\\{lastpage\\}`` tokens with
+    real PAGE/NUMPAGES fields.
+
+    Returns *rtf_path* unchanged when the file contains no placeholders;
+    otherwise writes a modified copy as ``work_dir/<same name>`` (the stem
+    must survive so the converted PDF keeps its name) and returns the copy.
+    The source file is never modified.
+    """
+    rtf_path = Path(rtf_path)
+    raw = rtf_path.read_bytes()
+    if not any(token in raw for token, _ in _PLACEHOLDER_FIELDS):
+        return rtf_path
+
+    for token, field in _PLACEHOLDER_FIELDS:
+        raw = raw.replace(token, field)
+
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    copy_path = work_dir / rtf_path.name
+    copy_path.write_bytes(raw)
+    return copy_path
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 

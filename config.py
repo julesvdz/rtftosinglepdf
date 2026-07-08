@@ -64,6 +64,19 @@ LIBREOFFICE_TIMEOUT_MIN: int = 60          # floor: never less than this
 MAX_PARALLEL_CONVERSIONS: int = 8
 
 # ---------------------------------------------------------------------------
+# UNO conversion mode — persistent soffice services driven via the UNO API,
+# giving real per-file progress. Falls back to the CLI path when unavailable.
+# ---------------------------------------------------------------------------
+UNO_ENABLED: bool = True          # master switch; False forces the CLI path
+UNO_READY_TIMEOUT: float = 90.0   # secs to wait for a slot's soffice + helper
+                                  # (first start creates the LO profile: slow)
+UNO_START_RETRIES: int = 3        # bootstrap attempts per slot, fresh port each
+UNO_LOAD_SPAN: int = 70           # % of the per-file bar given to the load
+                                  # phase; the export phase gets the remainder
+UNO_RECYCLE_AFTER: int = 100      # conversions per slot before a proactive
+                                  # restart (LO leaks memory over many docs)
+
+# ---------------------------------------------------------------------------
 # Temporary working subdirectory name (created inside output_dir at runtime)
 # ---------------------------------------------------------------------------
 TEMP_DIR_NAME: str = "_rtf2pdf_tmp"
