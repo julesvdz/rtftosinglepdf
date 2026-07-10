@@ -27,7 +27,6 @@
       <section class="card">
         <div class="card-title">Load previous config <span class="title-note">optional</span></div>
         <input class="field-input file-input" type="file" id="config_file" name="config_file" accept=".json" />
-        <div id="config-load-status" class="status-small"></div>
       </section>
 
       <section class="card">
@@ -66,44 +65,31 @@
               <button class="btn btn-sm" id="btn-generate-mapping" type="button">Generate from directory</button>
               <button class="btn btn-sm" id="btn-clear-csv" type="button">Clear</button>
             </div>
-            <div class="f-hint">optional; columns: RTF_Filename, Table_Number, Title</div>
           </div>
         </div>
       </section>
 
       <section class="card">
-        <div class="card-title">Header</div>
-        <div class="grid-3">
-          <div class="field">
-            <label class="f-label" for="header_left">Left</label>
-            <input class="field-input" type="text" id="header_left" name="header_left" />
-          </div>
-          <div class="field">
-            <label class="f-label" for="header_center">Center</label>
-            <input class="field-input" type="text" id="header_center" name="header_center" />
-          </div>
-          <div class="field">
-            <label class="f-label" for="header_right">Right</label>
-            <input class="field-input" type="text" id="header_right" name="header_right" />
-          </div>
-        </div>
-      </section>
+        <div class="card-title">Header and footer</div>
+        <div class="hf-table">
+          <span></span>
+          <span class="f-label">Left</span>
+          <span class="f-label">Center</span>
+          <span class="f-label">Right</span>
 
-      <section class="card">
-        <div class="card-title">Footer</div>
-        <div class="grid-3">
-          <div class="field">
-            <label class="f-label" for="footer_left">Left</label>
-            <input class="field-input" type="text" id="footer_left" name="footer_left" />
-          </div>
-          <div class="field">
-            <label class="f-label" for="footer_center">Center</label>
-            <input class="field-input" type="text" id="footer_center" name="footer_center" />
-          </div>
-          <div class="field">
-            <label class="f-label" for="footer_right">Right</label>
-            <input class="field-input" type="text" id="footer_right" name="footer_right" />
-          </div>
+          <label class="f-label" for="header_left">Header</label>
+          <input class="field-input" type="text" id="header_left" name="header_left" />
+          <input class="field-input" type="text" id="header_center" name="header_center"
+                 aria-label="Header center" />
+          <input class="field-input" type="text" id="header_right" name="header_right"
+                 aria-label="Header right" />
+
+          <label class="f-label" for="footer_left">Footer</label>
+          <input class="field-input" type="text" id="footer_left" name="footer_left" />
+          <input class="field-input" type="text" id="footer_center" name="footer_center"
+                 aria-label="Footer center" />
+          <input class="field-input" type="text" id="footer_right" name="footer_right"
+                 aria-label="Footer right" />
         </div>
       </section>
 
@@ -126,6 +112,14 @@
             <label for="toc_landscape_landscape">Landscape</label>
           </span>
 
+          <span class="opt-label" id="toc-wrap-label">ToC line wrap</span>
+          <span class="seg" id="toc-wrap-seg">
+            <input type="radio" name="toc_wrap" id="toc_wrap_yes" value="1">
+            <label for="toc_wrap_yes">Yes</label>
+            <input type="radio" name="toc_wrap" id="toc_wrap_no" value="0" checked>
+            <label for="toc_wrap_no">No</label>
+          </span>
+
           <span class="opt-label">Bookmarks</span>
           <span class="seg">
             <input type="radio" name="bookmarks_enabled" id="bookmarks_enabled_yes" value="1" checked>
@@ -141,34 +135,34 @@
         <div class="adv-body">
           <div class="adv-grid">
             <div class="field">
-              <label class="f-label" for="header_top_margin_pts">Header top margin <b>pts</b></label>
+              <label class="f-label" for="header_top_margin_pts">Header top margin</label>
               <input class="field-input mono" type="number" step="0.5" min="0"
                      id="header_top_margin_pts" name="header_top_margin_pts" value="28" />
             </div>
             <div class="field">
-              <label class="f-label" for="footer_bottom_margin_pts">Footer bottom margin <b>pts</b></label>
+              <label class="f-label" for="footer_bottom_margin_pts">Footer bottom margin</label>
               <input class="field-input mono" type="number" step="0.5" min="0"
                      id="footer_bottom_margin_pts" name="footer_bottom_margin_pts" value="35" />
+            </div>
+            <div class="field">
+              <label class="f-label" for="page_number_font_size">Page number font size</label>
+              <input class="field-input mono" type="number" step="1" min="6" max="24"
+                     id="page_number_font_size" name="page_number_font_size" value="8" />
+            </div>
+            <div class="field">
+              <label class="f-label" for="page_number_right_margin_pts">Page number right margin</label>
+              <input class="field-input mono" type="number" step="0.5"
+                     id="page_number_right_margin_pts" name="page_number_right_margin_pts" value="55" />
+            </div>
+            <div class="field">
+              <label class="f-label" for="page_number_bottom_margin_pts">Page number bottom margin</label>
+              <input class="field-input mono" type="number" step="0.5"
+                     id="page_number_bottom_margin_pts" name="page_number_bottom_margin_pts" value="18" />
             </div>
             <div class="field">
               <label class="f-label" for="max_workers">Parallel workers</label>
               <input class="field-input mono" type="number" step="1" min="1" max="32"
                      id="max_workers" name="max_workers" value="4" />
-            </div>
-            <div class="field">
-              <label class="f-label" for="page_number_right_margin_pts">Page number right margin <b>pts</b></label>
-              <input class="field-input mono" type="number" step="0.5"
-                     id="page_number_right_margin_pts" name="page_number_right_margin_pts" value="55" />
-            </div>
-            <div class="field">
-              <label class="f-label" for="page_number_bottom_margin_pts">Page number bottom margin <b>pts</b></label>
-              <input class="field-input mono" type="number" step="0.5"
-                     id="page_number_bottom_margin_pts" name="page_number_bottom_margin_pts" value="18" />
-            </div>
-            <div class="field">
-              <label class="f-label" for="page_number_font_size">Page number font size <b>pts</b></label>
-              <input class="field-input mono" type="number" step="1" min="6" max="24"
-                     id="page_number_font_size" name="page_number_font_size" value="8" />
             </div>
           </div>
           <div class="btn-row adv-actions">
@@ -224,6 +218,9 @@
     </div>
 
   </main>
+
+  <!-- Transient notifications (config loaded, RTF counts…) pile up here -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <script src="/static/js/app.js"></script>
 </body>

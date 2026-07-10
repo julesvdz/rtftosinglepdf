@@ -34,7 +34,7 @@ const progressContainer = document.getElementById('progress-container');
 const progressBarFill   = document.getElementById('progress-bar-fill');
 const progressLabel     = document.getElementById('progress-label');
 const jobErrorBox       = document.getElementById('job-error-box');
-const configLoadStatus  = document.getElementById('config-load-status');
+const toastContainer    = document.getElementById('toast-container');
 const fileProgress        = document.getElementById('file-progress');
 const fileProgressSummary = document.getElementById('file-progress-summary');
 const fileProgressList    = document.getElementById('file-progress-list');
@@ -120,6 +120,25 @@ function appendDirectLines(lines) {
     logBody.appendChild(span);
   });
   if (stick) logBody.scrollTop = logBody.scrollHeight;
+}
+
+/**
+ * Transient top-right notification. Identical messages refresh the existing
+ * toast's timer instead of piling up duplicates.
+ */
+function toast(message, kind = 'info', ms = 8000) {
+  for (const el of toastContainer.children) {
+    if (el.textContent === message) {
+      clearTimeout(el._timer);
+      el._timer = setTimeout(() => el.remove(), ms);
+      return;
+    }
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast-${kind}`;
+  el.textContent = message;
+  toastContainer.appendChild(el);
+  el._timer = setTimeout(() => el.remove(), ms);
 }
 
 function setProgress(pct, label) {
@@ -274,11 +293,13 @@ function updateRunEnabled() {
     : '';
 }
 
-/** ToC orientation has no effect when the ToC itself is off. */
-function syncTocOrientation() {
+/** ToC orientation and line wrap have no effect when the ToC itself is off. */
+function syncTocOptions() {
   const off = radioValue('toc_enabled') === '0';
-  document.getElementById('toc-orientation-seg').classList.toggle('disabled', off);
-  document.getElementById('toc-orientation-label').classList.toggle('disabled', off);
+  ['toc-orientation-seg', 'toc-orientation-label',
+   'toc-wrap-seg', 'toc-wrap-label'].forEach(id => {
+    document.getElementById(id).classList.toggle('disabled', off);
+  });
 }
 
 function resetUI() {
@@ -323,6 +344,7 @@ const FIELD_MAP = [
 const RADIO_MAP = [
   ['toc_enabled',       'toc_enabled'],
   ['toc_landscape',     'toc_landscape'],
+  ['toc_wrap',          'toc_wrap'],
   ['bookmarks_enabled', 'bookmarks_enabled'],
 ];
 
@@ -354,17 +376,15 @@ function populateFieldsFromConfig(cfg) {
     }
   }
 
-  const radioDefaults = { toc_enabled: true, toc_landscape: false, bookmarks_enabled: true };
+  const radioDefaults = { toc_enabled: true, toc_landscape: false, toc_wrap: false, bookmarks_enabled: true };
   for (const [name, key] of RADIO_MAP) {
     setRadio(name, (cfg[key] ?? radioDefaults[name]) ? '1' : '0');
   }
-  syncTocOrientation();
+  syncTocOptions();
   validateDirectory('rtf');
   validateDirectory('output');
 
-  configLoadStatus.textContent =
-    `Config loaded (saved ${cfg.timestamp ?? 'unknown time'})`;
-  setTimeout(() => { configLoadStatus.textContent = ''; }, 5000);
+  toast(`Config loaded (saved ${cfg.timestamp ?? 'unknown time'})`, 'ok');
 }
 
 // ── Collect form data ─────────────────────────────────────────────────────────
@@ -387,6 +407,7 @@ function buildFormData() {
 
   fd.append('toc_enabled', radioValue('toc_enabled') || '1');
   fd.append('toc_landscape', radioValue('toc_landscape') || '0');
+  fd.append('toc_wrap', radioValue('toc_wrap') || '0');
   fd.append('bookmarks_enabled', radioValue('bookmarks_enabled') || '1');
 
   const csvEl = document.getElementById('csv_file');
@@ -571,19 +592,14 @@ async function loadConfigFile() {
     const data = await resp.json();
 
     if (!resp.ok || data.error) {
-      configLoadStatus.style.color = 'var(--text-error)';
-      configLoadStatus.textContent = `Error: ${data.error ?? 'Unknown error'}`;
-      setTimeout(() => { configLoadStatus.textContent = ''; configLoadStatus.style.color = ''; }, 4000);
+      toast(`Config load error: ${data.error ?? 'Unknown error'}`, 'err', 12000);
       return;
     }
 
-    configLoadStatus.style.color = '';
     populateFieldsFromConfig(data);
 
   } catch (err) {
-    configLoadStatus.style.color = 'var(--text-error)';
-    configLoadStatus.textContent = `Failed: ${err.message}`;
-    setTimeout(() => { configLoadStatus.textContent = ''; configLoadStatus.style.color = ''; }, 4000);
+    toast(`Config load failed: ${err.message}`, 'err', 12000);
   }
 }
 
@@ -718,13 +734,16 @@ async function browseInto(input, kind) {
 btnBrowseRtf.addEventListener('click', () => browseInto(rtfDirInput, 'rtf'));
 btnBrowseOutput.addEventListener('click', () => browseInto(outputDirInput, 'output'));
 
-let validateSeq = 0;
+// Staleness guards, one per field — validations of DIFFERENT fields run
+// concurrently (e.g. both fire when a config file loads) and must never
+// invalidate each other.
+const validateSeq = { rtf: 0, output: 0 };
 
 async function validateDirectory(kind) {
   const input = kind === 'rtf' ? rtfDirInput : outputDirInput;
   const status = kind === 'rtf' ? rtfDirStatus : outputDirStatus;
   const value = input.value.trim();
-  const seq = ++validateSeq;
+  const seq = ++validateSeq[kind];
 
   if (!value) {
     status.textContent = '';
@@ -740,7 +759,7 @@ async function validateDirectory(kind) {
     fd.append('kind', kind);
     const resp = await fetch('/api/inspect-directory', { method: 'POST', body: fd });
     const data = await resp.json();
-    if (seq !== validateSeq) return;  // a newer validation superseded this one
+    if (seq !== validateSeq[kind]) return;  // superseded by a newer validation
 
     if (kind === 'rtf') {
       if (!data.exists) {
@@ -752,8 +771,11 @@ async function validateDirectory(kind) {
         status.className = 'dir-status warn';
         dirState.rtfOk = false;
       } else {
-        status.textContent = `${data.rtf_count} RTF file(s) found`;
-        status.className = 'dir-status ok';
+        // Success is transient info — problems stay inline, counts pile up
+        // as notifications instead of holding a line of layout.
+        status.textContent = '';
+        status.className = 'dir-status';
+        toast(`${data.rtf_count} RTF file(s) found`, 'ok');
         dirState.rtfOk = true;
       }
     } else {
@@ -767,7 +789,7 @@ async function validateDirectory(kind) {
       dirState.outOk = true;  // non-empty is enough; the job creates it
     }
   } catch (err) {
-    if (seq !== validateSeq) return;
+    if (seq !== validateSeq[kind]) return;
     status.textContent = '';
     status.className = 'dir-status';
     // Validation service unreachable — don't block the user.
@@ -790,9 +812,9 @@ outputDirInput.addEventListener('input', () => {
 });
 
 // ── ToC toggle ⇒ orientation availability ────────────────────────────────────
-document.getElementById('toc_enabled_yes').addEventListener('change', syncTocOrientation);
-document.getElementById('toc_enabled_no').addEventListener('change', syncTocOrientation);
+document.getElementById('toc_enabled_yes').addEventListener('change', syncTocOptions);
+document.getElementById('toc_enabled_no').addEventListener('change', syncTocOptions);
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-syncTocOrientation();
+syncTocOptions();
 updateRunEnabled();

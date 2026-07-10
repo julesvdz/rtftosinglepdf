@@ -65,6 +65,7 @@ def _default_config() -> dict:
         "csv_original_filename":  "",
         "max_workers": _defaults.DEFAULT_PARALLEL_CONVERSIONS,
         "toc_landscape": False,
+        "toc_wrap": False,
         "toc_enabled": True,
         "bookmarks_enabled": True,
     }
@@ -217,6 +218,7 @@ def build_params_from_form(form: dict) -> dict:
         ),
         "max_workers": _int("max_workers", _defaults.DEFAULT_PARALLEL_CONVERSIONS),
         "toc_landscape": form.get("toc_landscape") in ("1", "true", "on", "True", True),
+        "toc_wrap": form.get("toc_wrap") in ("1", "true", "on", "True", True),
         # Yes/no toggles; anything but an explicit "off" value counts as on,
         # so configs saved before these fields existed keep both features.
         "toc_enabled": form.get("toc_enabled", "1") not in ("0", "false", "off", "False", False),
