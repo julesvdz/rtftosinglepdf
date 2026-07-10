@@ -172,7 +172,8 @@ The system shall accept an optional CSV mapping file that defines the assembly s
 - AC-INP-003-04: CSV rows referencing RTF filenames not found in the input directory shall be skipped; the skip event shall be recorded in the process log.
 - AC-INP-003-05: The system shall raise an informative error if the CSV lacks required columns.
 - AC-INP-003-06: The CSV shall be accepted via file upload through the web interface.
-- AC-INP-003-07: Column headers shall be recognised case-insensitively with the following documented aliases:
+- AC-INP-003-07: When a row's `Title` value is blank, the display title shall fall back to the title extracted from the RTF file itself (per FS-PRO-002); non-blank `Title` values override the RTF-extracted title.
+- AC-INP-003-08: Column headers shall be recognised case-insensitively with the following documented aliases:
 
 | Canonical column | Accepted aliases |
 |---|---|
@@ -358,7 +359,7 @@ The system shall convert each source RTF file to an intermediate PDF using Libre
 | **Title** | Automatic Title Extraction from RTF Content |
 
 **Description:**  
-When no CSV mapping is provided, the system shall extract a display title for each RTF file by reading its content and identifying the first non-blank plain-text line after stripping RTF control words.
+When no CSV mapping is provided — or when a CSV row's `Title` value is blank — the system shall extract a display title for the RTF file by reading its content and identifying the first non-blank plain-text line after stripping RTF control words.
 
 **Acceptance Criteria:**  
 - AC-PRO-002-01: Only the first 16,384 bytes of each RTF file shall be read for title extraction purposes.

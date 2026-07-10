@@ -249,9 +249,35 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
             from modules.csv_handler import SectionEntry
             csv_entries = parse_csv(csv_file_path)
             resolved = resolve_entries_against_directory(csv_entries, rtf_dir)
+            # CSV titles override RTF-extracted titles, but a blank Title
+            # cell falls back to the title extracted from the RTF itself
+            # (same extraction logic as the no-CSV path).
+            blank_title_idxs = [
+                i for i, (entry, _) in enumerate(resolved) if not entry.title
+            ]
+            fallback_titles: dict[int, str] = {}
+            if blank_title_idxs:
+                _append_log(
+                    job_id,
+                    f"[INFO] {len(blank_title_idxs)} CSV row(s) have no title — "
+                    "extracting titles from the RTF files…",
+                )
+                title_workers = max(1, min(8, len(blank_title_idxs)))
+                with ThreadPoolExecutor(max_workers=title_workers) as tex:
+                    future_to_i = {
+                        tex.submit(extract_title, resolved[i][1]): i
+                        for i in blank_title_idxs
+                    }
+                    for f in as_completed(future_to_i):
+                        fallback_titles[future_to_i[f]] = f.result()
+                for i in blank_title_idxs:
+                    plogger.log_info(
+                        f"Title from RTF (blank in CSV): "
+                        f"{resolved[i][0].rtf_filename} → {fallback_titles[i]}"
+                    )
             file_list: list[tuple[Path, str, str]] = [
-                (path, entry.title, entry.table_number)
-                for entry, path in resolved
+                (path, entry.title or fallback_titles.get(i, path.stem), entry.table_number)
+                for i, (entry, path) in enumerate(resolved)
             ]
             # Warn about CSV entries with no matching file — these are
             # content the user asked for that will NOT be in the output.
@@ -580,7 +606,13 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
             # Links cannot be embedded in the standalone toc_doc (it doesn't
             # contain the content pages), so inject_toc_links() is called below
             # on combined_doc after assembly.
-            toc_doc, toc_page_count = build_toc(sections, page_rect, progress_cb=_toc_progress)
+            toc_wrap = bool(params.get("toc_wrap", False))
+            if toc_wrap:
+                _append_log(job_id, "[INFO] ToC: long lines wrap")
+                plogger.log_info("ToC: line wrap enabled")
+            toc_doc, toc_page_count, toc_layout = build_toc(
+                sections, page_rect, progress_cb=_toc_progress, wrap=toc_wrap
+            )
             _append_log(job_id, f"[INFO] ToC complete: {toc_page_count} page(s)")
             plogger.log_info(f"ToC: {toc_page_count} page(s) generated")
 
@@ -607,7 +639,7 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
             # links are valid and point correctly to the first page of each section.
             _append_log(job_id, f"[INFO] Injecting {n_toc_entries} ToC hyperlink(s)…")
             plogger.log_info(f"ToC: injecting {n_toc_entries} hyperlinks")
-            inject_toc_links(combined_doc, sections, prepended, page_rect)
+            inject_toc_links(combined_doc, sections, prepended, page_rect, toc_layout)
 
         _update_job(job_id, progress=75)
 

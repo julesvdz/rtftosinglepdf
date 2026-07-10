@@ -30,7 +30,9 @@ class SectionEntry(NamedTuple):
     """Represents one RTF file's metadata from the CSV mapping."""
     rtf_filename: str     # bare filename, e.g. "report01.rtf"
     table_number: str     # e.g. "14.1.1" — may be empty
-    title: str            # display title for ToC and bookmarks
+    title: str            # display title for ToC and bookmarks — may be
+                          # blank; the caller falls back to the RTF-extracted
+                          # title for blank values
 
 
 # ---------------------------------------------------------------------------
