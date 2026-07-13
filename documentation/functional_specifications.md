@@ -2,7 +2,7 @@
 
 **Document Title:** RTF-to-PDF Compiler — Functional Specifications  
 **Document ID:** FS-RTF2PDF-001  
-**Version:** 1.0  
+**Version:** 1.1  
 **Status:** Draft  
 **Effective Date:** 2026-02-24  
 **Classification:** GCP Validated System  
@@ -25,6 +25,7 @@
 | Version | Date | Author | Description |
 |---|---|---|---|
 | 1.0 | 2026-02-24 | *\<Author\>* | Initial release |
+| 1.1 | 2026-07-13 | *\<Author\>* | FS-PRO-001 and FS-OUT-005 revised: all processing moved to a local per-job temporary working directory (logged, removed after each run); intermediate per-section PDFs are no longer retained. |
 
 ---
 
@@ -340,10 +341,10 @@ The system shall convert each source RTF file to an intermediate PDF using Libre
 
 **Acceptance Criteria:**  
 - AC-PRO-001-01: The system shall locate the LibreOffice executable by checking the system PATH and a set of standard installation paths for Windows, Linux, and macOS.
-- AC-PRO-001-02: The conversion command shall be invoked as: `soffice --headless --norestore --nofirststartwizard --convert-to pdf --outdir <rtf_dir> <source.rtf>`
-- AC-PRO-001-03: Each intermediate PDF shall be written to the RTF input directory alongside its source RTF file.
+- AC-PRO-001-02: The conversion command shall be invoked as: `soffice --headless --norestore --nofirststartwizard --convert-to pdf --outdir <work_dir> <staged.rtf>`, where `<work_dir>` is the job's local temporary working directory (see FS-OUT-005) and `<staged.rtf>` is the locally staged copy of the source RTF.
+- AC-PRO-001-03: Each intermediate PDF shall be written to the job's local temporary working directory (FS-OUT-005), never to the RTF input directory or the output directory.
 - AC-PRO-001-04: The intermediate PDF filename shall be the source RTF stem with a `.pdf` extension.
-- AC-PRO-001-05: Intermediate PDFs shall be retained permanently after processing; they shall not be deleted by the application.
+- AC-PRO-001-05: Intermediate PDFs are transient working files; they shall be deleted together with the local temporary working directory when the job ends (FS-OUT-005).
 - AC-PRO-001-06: Each conversion shall be subject to a configurable timeout (default: 120 seconds). A file exceeding this timeout shall be recorded as an error; processing continues with remaining files.
 - AC-PRO-001-07: If LibreOffice is not found, the system shall terminate the job with an informative error before any conversion is attempted.
 
@@ -608,24 +609,25 @@ The compiled PDF shall include an embedded PDF bookmark outline (navigation tree
 
 ---
 
-### FS-OUT-005 — Intermediate PDF Files
+### FS-OUT-005 — Local Temporary Processing Area
 
 | Field | Value |
 |---|---|
 | **ID** | FS-OUT-005 |
 | **Category** | Output |
 | **Priority** | Medium |
-| **Title** | Intermediate Per-Section PDF Retention |
+| **Title** | Local Per-Job Temporary Working Directory |
 
 **Description:**  
-The system shall retain the intermediate per-section PDFs produced by LibreOffice conversion in the RTF input directory. These files shall not be deleted at any point during or after processing.
+All transient working files produced during a job — staged copies of the source RTF files, intermediate per-section PDFs, LibreOffice user profiles, and the final-PDF assembly file — shall be created in a per-job temporary working directory on the local disk, under the executing user's temporary area (`%LOCALAPPDATA%\Temp\rtf2pdf\job_<timestamp>_<jobid>`). The RTF input directory and the output directory, which may reside on a network share, shall receive no working files.
 
 **Acceptance Criteria:**  
-- AC-OUT-005-01: Each intermediate PDF shall be written to the same directory as its source RTF file.
-- AC-OUT-005-02: The intermediate PDF filename shall be the source RTF filename stem with `.pdf` extension.
-- AC-OUT-005-03: Intermediate PDFs shall persist after job completion (success or failure).
-- AC-OUT-005-04: Re-running the application shall overwrite existing intermediate PDFs with updated conversions.
-- AC-OUT-005-05: No temporary files or directories shall be created in the output directory.
+- AC-OUT-005-01: The working directory shall be created on the local disk under the user's temporary area, and its full path shall be recorded in the process log at job start.
+- AC-OUT-005-02: Each intermediate PDF within the working directory shall be named as the source RTF filename stem with `.pdf` extension.
+- AC-OUT-005-03: The working directory and its entire contents shall be deleted when the job ends, on success and on failure alike.
+- AC-OUT-005-04: Working directories orphaned by an abnormal application termination shall be removed at the next application start-up.
+- AC-OUT-005-05: No temporary files or directories shall be created in the RTF input directory or the output directory; the output directory shall receive only the compiled PDF, the process log, the configuration JSON, and the CSV mapping copy (when provided).
+- AC-OUT-005-06: Source RTF files shall never be modified; conversion shall read from the staged local copies.
 
 ---
 
@@ -879,7 +881,7 @@ This matrix cross-references each functional specification with its validation a
 | FS-OUT-002 | Compiled PDF | OQ-OUT-002 | Critical |
 | FS-OUT-003 | Configuration JSON Artefact | OQ-OUT-003 | High |
 | FS-OUT-004 | PDF Bookmarks | OQ-OUT-004 | High |
-| FS-OUT-005 | Intermediate PDF Retention | OQ-OUT-005 | Medium |
+| FS-OUT-005 | Local Temporary Processing Area | OQ-OUT-005 | Medium |
 | FS-AUD-001 | Process Log Generation | OQ-AUD-001 | Critical |
 | FS-AUD-002 | Audit Timestamp in JSON | OQ-AUD-002 | High |
 | FS-CFG-001 | Automatic Settings Persistence | OQ-CFG-001 | High |
