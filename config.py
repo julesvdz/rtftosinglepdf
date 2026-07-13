@@ -78,6 +78,9 @@ UNO_RECYCLE_AFTER: int = 100      # conversions per slot before a proactive
                                   # restart (LO leaks memory over many docs)
 
 # ---------------------------------------------------------------------------
-# Temporary working subdirectory name (created inside output_dir at runtime)
+# Local processing area: all per-job working files (staged RTF copies,
+# per-section PDFs, LibreOffice profiles, final-PDF staging) live under
+# %TEMP%\<LOCAL_TEMP_SUBDIR>\job_* on the LOCAL disk — never in the input or
+# output directory, which may be on a network share. Removed after each run.
 # ---------------------------------------------------------------------------
-TEMP_DIR_NAME: str = "_rtf2pdf_tmp"
+LOCAL_TEMP_SUBDIR: str = "rtf2pdf"

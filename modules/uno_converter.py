@@ -115,11 +115,11 @@ def kill_stale_soffice(profile_marker: str) -> int:
     """Kill orphaned soffice processes from a previous crashed/killed run.
 
     A hard kill of the app orphans the per-slot soffice services. They keep
-    their profile directories open, so the stale-dir sweep at job start
+    their profile directories open, so the stale-dir sweep at app start
     would silently fail and the processes would leak memory until reboot.
-    Only processes whose command line contains *profile_marker* (the
-    output dir's ``lo_profiles_`` profile URI prefix) are touched — a
-    user's interactive LibreOffice session never matches.
+    Only processes whose command line contains *profile_marker* (the local
+    temp root's ``job_`` profile URI prefix) are touched — a user's
+    interactive LibreOffice session never matches.
 
     Returns the number of processes killed.
     """

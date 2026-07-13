@@ -45,28 +45,32 @@ _PLACEHOLDER_FIELDS: list[tuple[bytes, bytes]] = [
 ]
 
 
-def preprocess_rtf_placeholders(rtf_path: str | Path, work_dir: str | Path) -> Path:
-    """Replace literal ``#\\{thispage\\}``/``#\\{lastpage\\}`` tokens with
-    real PAGE/NUMPAGES fields.
+def preprocess_rtf_placeholders(
+    rtf_path: str | Path, work_dir: str | Path
+) -> tuple[Path, bool]:
+    """Stage *rtf_path* into *work_dir* and replace literal
+    ``#\\{thispage\\}``/``#\\{lastpage\\}`` tokens with real PAGE/NUMPAGES
+    fields.
 
-    Returns *rtf_path* unchanged when the file contains no placeholders;
-    otherwise writes a modified copy as ``work_dir/<same name>`` (the stem
-    must survive so the converted PDF keeps its name) and returns the copy.
-    The source file is never modified.
+    ALWAYS writes a copy as ``work_dir/<same name>`` (the stem must survive
+    so the converted PDF keeps its name) — the source directory may be a
+    network share, and LibreOffice must only ever read from local disk.
+    Returns ``(copy_path, modified)`` where *modified* tells whether any
+    placeholder tokens were rewritten. The source file is never modified.
     """
     rtf_path = Path(rtf_path)
     raw = rtf_path.read_bytes()
-    if not any(token in raw for token, _ in _PLACEHOLDER_FIELDS):
-        return rtf_path
 
-    for token, field in _PLACEHOLDER_FIELDS:
-        raw = raw.replace(token, field)
+    modified = any(token in raw for token, _ in _PLACEHOLDER_FIELDS)
+    if modified:
+        for token, field in _PLACEHOLDER_FIELDS:
+            raw = raw.replace(token, field)
 
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     copy_path = work_dir / rtf_path.name
     copy_path.write_bytes(raw)
-    return copy_path
+    return copy_path, modified
 
 
 # ---------------------------------------------------------------------------

@@ -44,8 +44,13 @@ Then open **http://localhost:5000** in a browser.
 
 - Keep the console window open while using the tool; closing it stops the application.
 - The **first conversion after startup is slower** — LibreOffice creates its user profiles on first use. Subsequent jobs are faster.
-- The RTF input directory and the output directory must be **writable**: intermediate PDFs are written next to the input RTFs (and kept, by design), and a `_rtf2pdf_tmp` working folder is created in the output directory.
+- The **output directory must be writable**; it receives only the deliverables: the final PDF, the process log, `config.json`, and a copy of the CSV mapping (if used). The RTF input directory is only read from.
+- All processing happens in a **local temporary folder** under `%LOCALAPPDATA%\Temp\rtf2pdf\job_*` — its exact path is recorded in the process log, and it is removed automatically when the job ends (also on failure). Leftovers from a crashed run are cleaned up the next time the application starts.
 - The server listens on **all network interfaces, port 5000**, so other PCs on the LAN can reach it at `http://<pc-name>:5000`. If this is not wanted, block port 5000 in Windows Firewall (or allow it if LAN access is desired, per site policy).
+
+## 4a. Data on network shares
+
+The RTF input directory and the output directory may be on a network fileshare (a mapped drive letter such as `Z:\...` or a UNC path such as `\\server\share\...`). This is fully supported: each source RTF is copied once to the local temporary folder before conversion, all intermediate work (per-section PDFs, LibreOffice profiles, PDF assembly) is done on local disk, and only the final deliverables are written back to the share. Note that a mapped drive letter is only visible to the user session that mapped it — if the app is ever run under a different account (e.g. a scheduled task), use the UNC path instead.
 
 ## 5. Update to the latest version
 

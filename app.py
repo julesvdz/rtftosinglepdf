@@ -168,9 +168,40 @@ def _step_progress(job_id: str, label: str, base: int, span: int, plogger):
 
 
 # Reap any persistent soffice services on clean interpreter exit (Ctrl+C,
-# werkzeug reloader). Hard kills still orphan them; stale profile dirs are
-# swept at the next job start.
+# werkzeug reloader). Hard kills still orphan them; stale work dirs are
+# swept at the next app start.
 atexit.register(kill_all_slots)
+
+
+def _local_temp_root() -> Path:
+    """Local processing area for all per-job working files.
+
+    Lives under the user's %TEMP% so working data (staged RTF copies,
+    per-section PDFs, LibreOffice profiles, final-PDF staging) never touches
+    the input or output directory, which may be on a slow network share.
+    """
+    return Path(tempfile.gettempdir()) / _cfg.LOCAL_TEMP_SUBDIR
+
+
+def _sweep_stale_work_dirs() -> None:
+    """Remove per-job work dirs orphaned by a crashed/killed previous run.
+
+    Runs once at startup, before any job exists — sweeping per-job would be
+    unsafe now that concurrent jobs share the same temp root. Orphaned
+    soffice services are killed first: they hold their profile dirs open,
+    which would make the sweep silently leave litter behind.
+    """
+    temp_root = _local_temp_root()
+    if not temp_root.exists():
+        return
+    n_orphans = kill_stale_soffice(temp_root.resolve().as_uri() + "/job_")
+    if n_orphans:
+        print(
+            f"Killed {n_orphans} orphaned soffice process(es) from a previous run"
+        )
+        time.sleep(0.5)  # let Windows release their profile-dir handles
+    for stale in temp_root.glob("job_*"):
+        force_rmtree(stale)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +211,7 @@ atexit.register(kill_all_slots)
 def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
     """Full RTF → PDF pipeline executed in a background thread."""
     plogger = ProcessLogger()
+    work_dir: Path | None = None  # local processing area; removed in finally
 
     try:
         rtf_dir = Path(params["rtf_directory"])
@@ -193,8 +225,14 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
         config_stem = f"output_{ts}_config"   # config.json    → output_<ts>_config.json
         log_stem    = f"output_{ts}"           # process.log    → output_<ts>.log
 
-        # Subfolder inside output_dir that receives the individual converted PDFs.
-        indiv_dir = output_dir / pdf_stem
+        # ALL working files (staged RTF copies, per-section PDFs, LibreOffice
+        # profiles, final-PDF staging) live in a per-job folder on the LOCAL
+        # disk — the input/output dirs may be on a network share. The folder
+        # is removed in the finally below, success or failure.
+        work_dir = _local_temp_root() / f"job_{ts}_{job_id[:8]}"
+
+        # Receives the individual converted PDFs until they are merged.
+        indiv_dir = work_dir / "sections"
         indiv_dir.mkdir(parents=True, exist_ok=True)
 
         # Save config and open the process log immediately so both files
@@ -211,6 +249,8 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
         log_path = plogger.start(output_dir, log_stem)
         _append_log(job_id, f"[INFO] Process log → {log_path.name}")
         plogger.log_params(params_snapshot)
+        _append_log(job_id, f"[INFO] Local work folder → {work_dir}")
+        plogger.log_info(f"Local work folder: {work_dir}")
 
         # ── Copy CSV into output folder (audit trail) ────────────────────
         if csv_file_path:
@@ -348,30 +388,19 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
 
         # Each soffice instance needs its own user-profile directory; without
         # isolation, concurrent instances corrupt each other's lock files.
-        # The base dir is per-job so a dir left locked by an orphaned soffice
-        # (app crash / reloader restart mid-job) can't collide with this run;
-        # stale bases from previous runs are swept best-effort.
-        n_orphans = kill_stale_soffice(
-            output_dir.resolve().as_uri() + "/lo_profiles_"
-        )
-        if n_orphans:
-            _append_log(
-                job_id,
-                f"[INFO] Killed {n_orphans} orphaned soffice process(es) "
-                "from a previous run",
-            )
-            time.sleep(0.5)  # let Windows release their profile-dir handles
-        for stale in output_dir.glob("lo_profiles*"):
-            force_rmtree(stale)
-        profile_base = output_dir / f"lo_profiles_{job_id[:8]}"
+        # The per-job work_dir keeps this run's profiles unique; dirs left
+        # behind by a crashed run (with their orphaned soffice processes)
+        # are swept at app startup by _sweep_stale_work_dirs.
+        profile_base = work_dir / "lo_profiles"
         profile_base.mkdir(parents=True, exist_ok=True)
         profile_dirs = [profile_base / f"slot_{i}" for i in range(n_workers)]
         for pd in profile_dirs:
             pd.mkdir(exist_ok=True)
 
-        # Holds placeholder-rewritten RTF copies during conversion; removed
-        # in the finally below (no duplicates of source data left behind).
-        pre_dir = indiv_dir / "_preprocessed"
+        # Local staging area: EVERY source RTF is copied here (placeholder
+        # tokens rewritten when present) so LibreOffice only ever reads from
+        # local disk and each source file crosses the network exactly once.
+        pre_dir = work_dir / "staged_rtf"
 
         # Thread-local slot assignment: each worker thread gets a stable slot
         # index and reuses the same profile directory for all its files.
@@ -431,10 +460,12 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
 
             try:
                 pdf_path = indiv_dir / (rtf_path.stem + ".pdf")
-                # Rewrite literal #{thispage}/#{lastpage} tokens into real
-                # PAGE/NUMPAGES fields (modified copy; source untouched).
-                src_path = preprocess_rtf_placeholders(rtf_path, pre_dir)
-                if src_path != rtf_path:
+                # Stage a local copy, rewriting literal #{thispage}/#{lastpage}
+                # tokens into real PAGE/NUMPAGES fields (source untouched).
+                src_path, placeholders_replaced = preprocess_rtf_placeholders(
+                    rtf_path, pre_dir
+                )
+                if placeholders_replaced:
                     _append_log(
                         job_id,
                         f"[INFO] {rtf_path.name}: replaced "
@@ -534,21 +565,11 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
                         plogger.log_info(f"Converted: {rtf_path.name}")
                         ok_count += 1
         finally:
-            # Kill persistent soffice services BEFORE removing their profile
-            # dirs — a live process holds the dir open and rmtree would
-            # silently leave litter behind.
+            # Kill persistent soffice services here; their profile dirs live
+            # inside work_dir, which the job-level cleanup below removes.
             for s in slots:
                 if s is not None:
                     s.kill()
-            # Windows can hold profile-dir handles for a moment after the
-            # killed soffice processes exit, and LibreOffice leaves
-            # read-only files behind; force-delete with brief retries.
-            for _ in range(10):
-                force_rmtree(profile_base)
-                if not profile_base.exists():
-                    break
-                time.sleep(0.3)
-            shutil.rmtree(pre_dir, ignore_errors=True)
 
         # Rebuild in original order, skipping any failed files.
         converted: list[tuple[str, str, str, str]] = [
@@ -709,18 +730,21 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
         _update_job(job_id, progress=92)
 
         # ── Save final PDF ────────────────────────────────────────────────
-        # Write to a .partial name and atomically rename on success: a PDF
-        # at the final filename must ALWAYS be a finished file — the save
-        # can take minutes on large documents and must never be observable
-        # half-written at its final destination.
+        # Assemble on LOCAL disk (the garbage-collecting save can take
+        # minutes and must not run against a network share), then copy to
+        # the output dir as .partial and atomically rename on success: a PDF
+        # at the final filename must ALWAYS be a finished file — never
+        # observable half-written at its final destination.
         output_pdf = output_dir / f"{pdf_stem}.pdf"
         partial_pdf = output_dir / f"{pdf_stem}.pdf.partial"
+        local_pdf = work_dir / f"{pdf_stem}.pdf"
         _append_log(job_id, f"[INFO] Writing PDF → {output_pdf.name}")
         _set_step(job_id, "Writing final PDF", pct=None)
         t_step = time.monotonic()
         try:
-            combined_doc.save(str(partial_pdf), garbage=4, deflate=True, clean=True)
+            combined_doc.save(str(local_pdf), garbage=4, deflate=True, clean=True)
             combined_doc.close()
+            shutil.copy2(local_pdf, partial_pdf)
             os.replace(partial_pdf, output_pdf)
         finally:
             if partial_pdf.exists():
@@ -817,6 +841,24 @@ def _run_job(job_id: str, params: dict, csv_file_path: str | None) -> None:
             plogger.flush(output_dir, 0, filename_stem=f"output_{err_ts}")
         except Exception:
             pass  # best effort
+    finally:
+        # Always remove the local work folder — success or failure. Windows
+        # can hold profile-dir handles for a moment after the killed soffice
+        # processes exit, and LibreOffice leaves read-only files behind;
+        # force-delete with brief retries.
+        if work_dir is not None:
+            for _ in range(10):
+                force_rmtree(work_dir)
+                if not work_dir.exists():
+                    break
+                time.sleep(0.3)
+            if work_dir.exists():
+                _append_log(
+                    job_id,
+                    f"[WARN] Could not fully remove local work folder: {work_dir}",
+                )
+            else:
+                _append_log(job_id, "[INFO] Local work folder removed")
 
 
 # ---------------------------------------------------------------------------
@@ -1280,6 +1322,7 @@ def api_sample_mapping_template() -> Response:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    _sweep_stale_work_dirs()
     # debug=False: the werkzeug reloader restarts the process on any source
     # edit, killing running job threads mid-conversion, and debug mode
     # exposes the interactive debugger on 0.0.0.0. Enable manually for
